@@ -1,8 +1,15 @@
-import Vapi from "@vapi-ai/web";
+import VapiModule from "@vapi-ai/web";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Candidate, SaveCallRequest, TranscriptLine } from "../../shared/types";
 import { buildAssistantOverrides } from "../lib/agentPrompt";
 import { isVapiConfigured, VAPI_ASSISTANT_ID, VAPI_PUBLIC_KEY } from "../lib/vapiConfig";
+
+// @vapi-ai/web ships CommonJS (`exports.default = Vapi`). Depending on how Vite pre-bundles it, the
+// default import is either the class itself or the whole module object `{ default: Vapi }`.
+// Unwrap the second case, otherwise `new Vapi()` throws "Vapi is not a constructor".
+type VapiClass = typeof VapiModule;
+const Vapi: VapiClass = (VapiModule as unknown as { default?: VapiClass }).default ?? VapiModule;
+type Vapi = InstanceType<VapiClass>;
 
 export type CallStatus = "idle" | "requesting-mic" | "connecting" | "live" | "ending" | "ended" | "error";
 
