@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { toE164 } from "../shared/phone.js";
 import type { ApiErrorBody, CallRecord, Candidate, SaveCallRequest, TranscriptLine } from "../shared/types.js";
 
 const BASE_URL = (process.env.BASE_URL ?? "http://localhost:3000").replace(/\/$/, "");
@@ -222,7 +223,41 @@ async function main(): Promise<void> {
   const badBody = await readJson(badRes);
   check(badRes.status === 415 && isApiError(badBody), ".txt upload → 415 JSON error", JSON.stringify(badBody));
 
-  // 10. Cleanup
+  // 10. Phone call (never dials: only checks validation, config and error shapes)
+  const phoneCfg = (h as { phoneCall?: { configured?: unknown; missingEnvVars?: unknown } }).phoneCall;
+  check(
+    typeof phoneCfg?.configured === "boolean" && Array.isArray(phoneCfg.missingEnvVars),
+    `health.phoneCall reports configuration (configured: ${String(phoneCfg?.configured)})`,
+  );
+  const phoneCases: [string | null, string | null][] = [
+    ["+91-8299269534", "+918299269534"],
+    ["8299269534", "+918299269534"],
+    ["08299269534", "+918299269534"],
+    ["+91 98765 43210 / 9123456789", "+919876543210"],
+    ["+1 (737) 250-8034", "+17372508034"],
+    ["12345", null],
+    [null, null],
+  ];
+  const badPhone = phoneCases.find(([input, want]) => toE164(input) !== want);
+  check(badPhone === undefined, "toE164 normalises Indian and international numbers", JSON.stringify(badPhone));
+  const noJob = await fetch(`${BASE_URL}/api/candidates/${candidate.id}/phone-call`);
+  const noJobBody = await readJson(noJob);
+  check(noJob.status === 404 && isApiError(noJobBody), "GET /:id/phone-call before any call → 404 JSON error", JSON.stringify(noJobBody));
+  const ghost = await fetch(`${BASE_URL}/api/candidates/00000000-0000-4000-8000-000000000000/phone-call`, { method: "POST" });
+  check(ghost.status === 404 && isApiError(await readJson(ghost)), "POST phone-call for unknown candidate → 404");
+  if (phoneCfg?.configured === false) {
+    const unconfigured = await fetch(`${BASE_URL}/api/candidates/${candidate.id}/phone-call`, { method: "POST" });
+    const unconfiguredBody = await readJson(unconfigured);
+    check(
+      unconfigured.status === 503 && isApiError(unconfiguredBody) && unconfiguredBody.code === "PHONE_NOT_CONFIGURED",
+      "POST phone-call without Vapi phone env → 503 PHONE_NOT_CONFIGURED",
+      JSON.stringify(unconfiguredBody),
+    );
+  } else {
+    console.log("   … phone calls are configured: skipping the POST check so the e2e never dials a real number");
+  }
+
+  // 11. Cleanup
   if (KEEP) {
     console.log(`\n   (--keep) left candidate ${candidate.id} in place`);
   } else {

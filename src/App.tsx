@@ -1,7 +1,7 @@
 import { AlertTriangle, Download, Loader2, RefreshCw, UserSearch } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Candidate } from "../shared/types";
-import { downloadExportCsv, errorMessage, getHealth, listCandidates, type HealthResponse } from "./api";
+import { downloadExportCsv, errorMessage, getCandidate, getHealth, listCandidates, type HealthResponse } from "./api";
 import CallModal from "./components/CallModal";
 import CandidateDetailPanel from "./components/CandidateDetailPanel";
 import CandidateGrid from "./components/CandidateGrid";
@@ -132,6 +132,15 @@ function Dashboard() {
     setPanelRefreshKey((k) => k + 1);
   }
 
+  async function handlePhoneCallSaved(candidateId: string) {
+    try {
+      handleCallSaved(await getCandidate(candidateId));
+      toast.success("Phone call saved and analysed");
+    } catch (err) {
+      toast.error(`Phone call saved, but refreshing the candidate failed: ${errorMessage(err)}`);
+    }
+  }
+
   const callDisabled = !canCall || callingCandidate !== null;
   const callDisabledReason = !canCall
     ? `Voice calling is disabled: set ${vapiMissingEnvVars.join(" and ")} in .env, or use Chrome/Edge for the free demo voice`
@@ -254,6 +263,8 @@ function Dashboard() {
           onDeleted={(id) => handleDeleted(id, candidates.find((c) => c.id === id)?.resumeData.name ?? null)}
           callDisabled={callDisabled}
           callDisabledReason={callDisabledReason}
+          phoneCallConfig={health?.phoneCall ?? null}
+          onPhoneCallSaved={(id) => void handlePhoneCallSaved(id)}
         />
       )}
 

@@ -42,7 +42,7 @@ An HR recruiter uploads a resume (PDF or DOCX). Gemini extracts structured candi
 3. **Vapi** ([dashboard.vapi.ai](https://dashboard.vapi.ai)):
    1. Go to **Organization → API Keys** and copy the **Public Key**, not the private one. Put it in `.env` as `VITE_VAPI_PUBLIC_KEY`.
    2. Go to **Assistants → Create Assistant** (a blank template is fine), then fill in each tab:
-      - **Model**: provider **OpenAI**, model **gpt-4o**. This must match `VAPI_MODEL` in [src/lib/vapiConfig.ts](src/lib/vapiConfig.ts), because the app sends this model as an override. If your account uses another provider/model, change both.
+      - **Model**: provider **OpenAI**, model **gpt-4o**. This must match `VAPI_MODEL` in [shared/company.ts](shared/company.ts), because the app sends this model as an override. If your account uses another provider/model, change both.
       - **First message / system prompt**: anything, e.g. "Hello" / "You are a helpful assistant". The app replaces both on every call.
       - **Transcriber**: one that handles Hindi/English code-switching, e.g. **Deepgram `nova-3`** with language **`multi`**. An English-only transcriber will garble Hinglish answers.
       - **Voice**: a voice that can speak both Hindi and English, e.g. an **ElevenLabs multilingual** model (`eleven_multilingual_v2` / `eleven_turbo_v2_5`) or an Azure `hi-IN` neural voice.
@@ -55,6 +55,9 @@ An HR recruiter uploads a resume (PDF or DOCX). Gemini extracts structured candi
    VITE_VAPI_ASSISTANT_ID=your-assistant-id
    # Optional: use a different Gemini model (default gemini-3.6-flash)
    # GEMINI_MODEL=gemini-3.5-flash-lite
+   # Optional: "Call on phone" (see below). Server only, never sent to the browser.
+   # VAPI_PRIVATE_KEY=your-vapi-private-key
+   # VAPI_PHONE_NUMBER_ID=your-vapi-phone-number-id
    ```
 5. **Run**
    ```bash
@@ -87,17 +90,24 @@ An HR recruiter uploads a resume (PDF or DOCX). Gemini extracts structured candi
 │   ├── validation.ts         # validateSaveCallRequest()
 │   ├── csv.ts                # RFC 4180 CSV with BOM + formula-injection guard
 │   ├── repository.ts         # CandidateRepository interface + JSON-file implementation
+│   ├── callRecorder.ts       # recordCall(): Gemini analysis + save, shared by browser and phone calls
+│   ├── vapiPhone.ts          # Vapi REST client: POST /call, GET /call/:id, transcript mapping
+│   ├── phoneCalls.ts         # In-memory phone-call jobs: dial, poll until ended, analyse, save
 │   └── routes/
-│       ├── candidates.ts     # list / get / delete / save call
+│       ├── candidates.ts     # list / get / delete / save call / phone call
 │       ├── resume.ts         # upload + parse
 │       └── export.ts         # CSV export
-├── shared/types.ts           # Types shared by server and browser
+├── shared/
+│   ├── types.ts              # Types shared by server and browser
+│   ├── agentPrompt.ts        # Per-candidate Vapi assistantOverrides (prompt, first message, variables)
+│   ├── company.ts            # Agent/company facts, jobRoleFor(), VAPI_MODEL
+│   └── phone.ts              # toE164(): resume phone → E.164, India by default
 ├── src/
 │   ├── main.tsx, App.tsx, index.css, api.ts, vite-env.d.ts
 │   ├── components/           # UploadDropzone, CandidateGrid/Card, Toolbar, CandidateDetailPanel,
 │   │                         # CallHistory, CallModal, ConfirmDialog, DeleteCandidateDialog, Toast, ErrorBoundary
 │   ├── hooks/useVapiCall.ts  # Vapi lifecycle, transcript capture, exactly-once onEnded
-│   └── lib/                  # agentPrompt.ts, vapiConfig.ts, format.ts, scrollLock.ts
+│   └── lib/                  # vapiConfig.ts, format.ts, scrollLock.ts (agentPrompt.ts re-exports shared/)
 ├── scripts/                  # seed.ts, make-sample-resume.ts, sample-transcript.json
 ├── samples/                  # sample-resume.docx (committed)
 └── data/                     # candidates.json (runtime, gitignored)
@@ -105,16 +115,18 @@ An HR recruiter uploads a resume (PDF or DOCX). Gemini extracts structured candi
 
 ## API reference
 
-Every error is JSON `{ "error": string, "code"?: string }` with a matching HTTP status. Common codes are `NOT_FOUND`, `INVALID_BODY`, `GEMINI_NOT_CONFIGURED` (503), `GEMINI_FAILED`/`GEMINI_OVERLOADED` (502), `GEMINI_RATE_LIMIT` (429), `DATA_CORRUPT` (500) and `INTERNAL_ERROR` (500).
+Every error is JSON `{ "error": string, "code"?: string }` with a matching HTTP status. Common codes are `NOT_FOUND`, `NO_PHONE`/`INVALID_PHONE` (400), `PHONE_CALL_IN_PROGRESS` (409), `PHONE_NOT_CONFIGURED` (503), `VAPI_ERROR`/`VAPI_AUTH_FAILED`/`VAPI_UNREACHABLE` (502), `INVALID_BODY`, `GEMINI_NOT_CONFIGURED` (503), `GEMINI_FAILED`/`GEMINI_OVERLOADED` (502), `GEMINI_RATE_LIMIT` (429), `DATA_CORRUPT` (500) and `INTERNAL_ERROR` (500).
 
 | Method & path | Request | Success response | Errors |
 |---|---|---|---|
-| `GET /api/health` | — | `200 {"ok":true,"geminiConfigured":true}` | — |
+| `GET /api/health` | — | `200 {"ok":true,"geminiConfigured":true,"phoneCall":{"configured":false,"missingEnvVars":["VAPI_PRIVATE_KEY"]}}` | — |
 | `GET /api/candidates` | — | `200 Candidate[]`, newest first | 500 `DATA_CORRUPT` |
 | `GET /api/candidates/:id` | — | `200 Candidate` | 404 `NOT_FOUND` |
 | `DELETE /api/candidates/:id` | — | `204` (no body) | 404 `NOT_FOUND` |
 | `POST /api/resume` | `multipart/form-data`, field `resume` (PDF/DOCX ≤ 5 MB) | `201 Candidate` | 400 `NO_FILE`, 413 `LIMIT_FILE_SIZE`, 415 `UNSUPPORTED_FILE`, 422 `EMPTY_DOCUMENT` / `NOT_A_RESUME`, 429, 502, 503 |
 | `POST /api/candidates/:id/calls` | JSON `SaveCallRequest` | `201 { candidate, call }` | 400 `INVALID_BODY`, 404 `NOT_FOUND` |
+| `POST /api/candidates/:id/phone-call` | — | `202 PhoneCallJob` (status `dialing`) | 400 `NO_PHONE` / `INVALID_PHONE`, 404 `NOT_FOUND`, 409 `PHONE_CALL_IN_PROGRESS`, 502 `VAPI_*`, 503 `PHONE_NOT_CONFIGURED` |
+| `GET /api/candidates/:id/phone-call` | — | `200 PhoneCallJob`: `dialing` → `in-progress` → `analysing` → `done` (with `call`) or `error` (with `error`, `endedReason`) | 404 `NO_PHONE_CALL` |
 | `GET /api/export.csv` | — | `200 text/csv`, `attachment; filename="candidates-YYYY-MM-DD.csv"` | 500 `DATA_CORRUPT` |
 
 **Examples**
@@ -186,14 +198,27 @@ Conventions: ISO date strings, ids from `crypto.randomUUID()`, and `null` (never
 
 ## How the voice agent works
 
-- The Vapi assistant in your dashboard supplies the **voice and transcriber**. Each call passes **`assistantOverrides`** built by `buildAssistantOverrides(candidate)` in [src/lib/agentPrompt.ts](src/lib/agentPrompt.ts):
+- The Vapi assistant in your dashboard supplies the **voice and transcriber**. Each call passes **`assistantOverrides`** built by `buildAssistantOverrides(candidate)` in [shared/agentPrompt.ts](shared/agentPrompt.ts) (the browser call and the phone call use the same builder):
   - **`model`**: `VAPI_MODEL` (temperature 0.4) with a **system prompt generated per candidate**. It contains the known resume facts, the missing fields, a fixed flow (confirm details → ask what's missing → CTC → expected CTC → notice period → reason for change → location → interest → interview availability), the rules (one question at a time, no invented job details, no salary negotiation) and a closing script.
-  - **`firstMessage`**: "Hi {firstName}, this is Priya from White Collar Realty's HR team. I'm calling about the {appliedRole} role…". The role comes from the candidate's resume (`appliedRole`, e.g. "Position applied for: SEO Executive"); when the resume doesn't name one, the agent says "an open position with us". Edit `AGENT_NAME`, `COMPANY_NAME`, `COMPANY_FACTS`, `OFFICE_LOCATION` and `DEFAULT_JOB_ROLE` in [src/lib/vapiConfig.ts](src/lib/vapiConfig.ts).
+  - **`firstMessage`**: "Hi {firstName}, this is Priya from White Collar Realty's HR team. I'm calling about the {appliedRole} role…". The role comes from the candidate's resume (`appliedRole`, e.g. "Position applied for: SEO Executive"); when the resume doesn't name one, the agent says "an open position with us". Edit `AGENT_NAME`, `COMPANY_NAME`, `COMPANY_FACTS`, `OFFICE_LOCATION` and `DEFAULT_JOB_ROLE` in [shared/company.ts](shared/company.ts).
   - **`variableValues`**: `candidateName`, `firstName`, `currentCompany`, `currentDesignation`, `experience`, `location`, `skills`, `agentName`, `companyName` and `jobRole`, with `"not mentioned"` for nulls. You can use them as `{{firstName}}` etc. in the dashboard assistant if you prefer to edit prompts there.
 - **Missing fields**: the prompt lists which of current company, current designation, total experience, current location and email are `null` in the resume, and the agent asks for those.
 - **Follow-up calls**: if the candidate has an analysed earlier call, its non-null answers are added as "KNOWN FROM PREVIOUS CALL (confirm these briefly instead of asking again)".
 - **Language**: the agent replies in the candidate's language (English, Hindi or Hinglish). The analysis is always written in English, with amounts kept as said ("18 LPA").
 - **Transcript capture**: [useVapiCall](src/hooks/useVapiCall.ts) shows partial transcripts live (faded) but stores **only `final` transcript messages**. When the call ends, by either side or by an error mid-call, the captured transcript is posted exactly once to `POST /api/candidates/:id/calls` for analysis.
+
+## Call on phone (Vapi + Twilio)
+
+The detail panel has a **Call on phone** button. The server dials the candidate's resume phone number from your Vapi phone number, with the same per-candidate prompt as the browser call. No webhook or ngrok is needed: the server polls Vapi until the call ends, then analyses and saves it like a browser call (`callId` is the Vapi call id).
+
+- **Number format**: the resume phone is normalised to E.164 by [shared/phone.ts](shared/phone.ts). Indian numbers in any common format (`+91-8299269534`, `08299269534`, `8299269534`) become `+918299269534`; other countries need a leading `+` or `00`. If the resume lists several numbers, the first is used. Missing or invalid numbers give a JSON 400 and the button is disabled with a hint.
+- **Status**: `dialing` → `in-progress` → `analysing` → `done`, or `error` with Vapi's ended reason (e.g. `customer-did-not-answer`). You can close the panel mid-call; reopening it shows the current status. Jobs live in server memory, so restarting `npm run dev` mid-call loses tracking (the call itself is still in Vapi → Logs).
+- **Setup**:
+  1. Vapi → **Phone Numbers → Import** your Twilio number (Account SID + Auth Token), then copy its **Phone Number ID** into `.env` as `VAPI_PHONE_NUMBER_ID`.
+  2. Vapi → **Organization → API Keys** → copy the **Private Key** into `.env` as `VAPI_PRIVATE_KEY`. Never put it in a `VITE_` variable or commit it.
+  3. Twilio → **Voice → Geo Permissions** → enable the countries you call (e.g. India).
+  4. Restart `npm run dev`. The phone call uses `VITE_VAPI_ASSISTANT_ID` (set `VAPI_ASSISTANT_ID` to use a different assistant for phone calls).
+- **Twilio trial accounts** can only call verified numbers, and play a trial message before the agent speaks.
 
 ## Free demo mode (no Vapi keys)
 
@@ -233,7 +258,7 @@ How list columns are joined:
 | Upload says "overloaded" / 502 `GEMINI_OVERLOADED`, or requests time out | Google is returning 503 (high demand). Wait a minute and retry. If it persists, set `GEMINI_MODEL` in `.env` to another Flash model available to your key and restart. `gemini-3.5-flash-lite` is the fastest fallback (~8 s per resume, all e2e checks pass); `gemini-3.5-flash` can exceed the 60 s timeout under load. |
 | 429 `GEMINI_RATE_LIMIT` | The free-tier quota is exhausted. Wait, or use a key with a higher quota. |
 | Upload or analysis 404 mentioning the model | Your key can't use the configured model. Set `GEMINI_MODEL` in `.env` to a model listed for your key in AI Studio, then restart. |
-| Call fails to start, or errors mentioning model/overrides | `VAPI_MODEL` in `src/lib/vapiConfig.ts` doesn't match a provider/model enabled on your Vapi account. Make it match your assistant's model. |
+| Call fails to start, or errors mentioning model/overrides | `VAPI_MODEL` in `shared/company.ts` doesn't match a provider/model enabled on your Vapi account. Make it match your assistant's model. |
 | Hindi/Hinglish answers transcribed as gibberish | Set the assistant's transcriber to a multilingual model (e.g. Deepgram `nova-3`, language `multi`) and use a quiet room and a headset. |
 | `EADDRINUSE: port 3000` | Another process is using the port. Stop it, or run `PORT=3001 npm run dev` (PowerShell: `$env:PORT=3001; npm run dev`). |
 | "data/candidates.json is corrupted" | The app never overwrites a corrupted file. Fix the JSON or move the file away, and a fresh one is created. |

@@ -1,14 +1,10 @@
-import { randomUUID } from "node:crypto";
 import { Router, type Request, type Response } from "express";
-import type { CallAnalysis, CallRecord, Candidate } from "../../shared/types.js";
-import { analyseCall } from "../callAnalyzer.js";
+import type { CallRecord, Candidate, PhoneCallJob } from "../../shared/types.js";
+import { candidateNotFound as notFound, recordCall } from "../callRecorder.js";
 import { AppError } from "../errors.js";
+import { getPhoneCallJob, startPhoneCall } from "../phoneCalls.js";
 import { candidateRepository } from "../repository.js";
 import { validateSaveCallRequest } from "../validation.js";
-
-function notFound(): AppError {
-  return new AppError(404, "Candidate not found", "NOT_FOUND");
-}
 
 export const candidatesRouter = Router();
 
@@ -24,56 +20,32 @@ candidatesRouter.get("/:id", async (req: Request<{ id: string }>, res: Response<
 
 type SaveCallResponse = { candidate: Candidate; call: CallRecord };
 
-const NO_SPEECH_ERROR = "No candidate speech was captured, so the call could not be analysed.";
-
 candidatesRouter.post(
   "/:id/calls",
   async (req: Request<{ id: string }>, res: Response<SaveCallResponse>) => {
     const body = validateSaveCallRequest(req.body);
+    const { candidate, call } = await recordCall(req.params.id, body);
+    res.status(201).json({ candidate, call });
+  },
+);
 
+/** Places a real phone call through Vapi. The server tracks it; poll GET /:id/phone-call for progress. */
+candidatesRouter.post(
+  "/:id/phone-call",
+  async (req: Request<{ id: string }>, res: Response<PhoneCallJob>) => {
     const candidate = await candidateRepository.get(req.params.id);
     if (!candidate) throw notFound();
+    res.status(202).json(await startPhoneCall(candidate));
+  },
+);
 
-    let analysis: CallAnalysis | null = null;
-    let analysisError: string | null = null;
-
-    if (!body.transcript.some((line) => line.role === "user")) {
-      analysisError = NO_SPEECH_ERROR;
-    } else {
-      // The transcript must never be lost: any analysis failure is recorded on the call instead of failing the request.
-      try {
-        analysis = await analyseCall(candidate, body.transcript);
-      } catch (err) {
-        if (err instanceof AppError) {
-          analysisError = err.message;
-        } else {
-          console.error("[calls] unexpected analysis error:", err instanceof Error ? err.stack : err);
-          analysisError = "The AI service failed to process this request. Please try again.";
-        }
-      }
-    }
-
-    const call: CallRecord = {
-      id: randomUUID(),
-      callId: body.callId,
-      startedAt: body.startedAt,
-      endedAt: body.endedAt,
-      durationSec: body.durationSec,
-      transcript: body.transcript,
-      analysis,
-      analysisError,
-      createdAt: new Date().toISOString(),
-    };
-
-    const updated = await candidateRepository.update(candidate.id, (c) => ({
-      ...c,
-      status: "called",
-      calls: [...c.calls, call],
-    }));
-    // The candidate was deleted while Gemini was running.
-    if (!updated) throw notFound();
-
-    res.status(201).json({ candidate: updated, call });
+/** The latest phone call job for this candidate (dialing, in-progress, analysing, done or error). */
+candidatesRouter.get(
+  "/:id/phone-call",
+  async (req: Request<{ id: string }>, res: Response<PhoneCallJob>) => {
+    const job = getPhoneCallJob(req.params.id);
+    if (!job) throw new AppError(404, "No phone call has been placed to this candidate since the server started.", "NO_PHONE_CALL");
+    res.json(job);
   },
 );
 
