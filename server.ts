@@ -29,7 +29,7 @@ async function main(): Promise<void> {
   app.use("/api", exportRouter);
 
   app.use("/api", (_req: Request, res: Response<ApiErrorBody>) => {
-    res.status(404).json({ error: "Not found" });
+    res.status(404).json({ error: "Not found", code: "NOT_FOUND" });
   });
 
   app.use((err: unknown, _req: Request, res: Response<ApiErrorBody>, next: NextFunction) => {
@@ -63,11 +63,12 @@ async function main(): Promise<void> {
       err.status >= 400 &&
       err.status < 500
     ) {
-      res.status(err.status).json({ error: err.message });
+      const code = err.status === 413 ? "PAYLOAD_TOO_LARGE" : "INVALID_BODY";
+      res.status(err.status).json({ error: err.message, code });
       return;
     }
     console.error(err instanceof Error ? err.stack : err);
-    res.status(500).json({ error: "Internal server error" });
+    res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR" });
   });
 
   const vite = await createViteServer({ server: { middlewareMode: true }, appType: "spa" });

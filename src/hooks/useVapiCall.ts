@@ -6,7 +6,7 @@ import { isVapiConfigured, VAPI_ASSISTANT_ID, VAPI_PUBLIC_KEY } from "../lib/vap
 
 export type CallStatus = "idle" | "requesting-mic" | "connecting" | "live" | "ending" | "ended" | "error";
 
-export type PartialLine = { role: TranscriptLine["role"]; text: string };
+type PartialLine = { role: TranscriptLine["role"]; text: string };
 
 type Options = {
   /** Called exactly once per call, when it ends (normally, by error, or by stop()). */
@@ -40,7 +40,7 @@ function hasProp<K extends string>(value: unknown, key: K): value is Record<K, u
 }
 
 /** Vapi/Daily errors come in many shapes; dig out something a human can read. */
-export function readableVapiError(e: unknown): string {
+function readableVapiError(e: unknown): string {
   if (typeof e === "string" && e.trim()) return e;
   if (hasProp(e, "error")) {
     const inner = e.error;

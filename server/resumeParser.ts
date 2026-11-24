@@ -72,7 +72,7 @@ export const resumeSchema: Schema = {
   ],
 };
 
-export const systemInstruction = `You extract candidate details from a resume. Use ONLY information explicitly present in the document. If a field is not present, return null (or [] for lists). Never guess, infer or invent names, emails, phone numbers, companies, titles, dates or numbers.
+const systemInstruction = `You extract candidate details from a resume. Use ONLY information explicitly present in the document. If a field is not present, return null (or [] for lists). Never guess, infer or invent names, emails, phone numbers, companies, titles, dates or numbers.
 
 Field rules:
 - name, email, phone, location: copy exactly as written in the resume. location is the candidate's own city/region, not an employer's address. If absent, null.
@@ -92,7 +92,7 @@ function buildInstruction(): string {
 
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
-export type UploadedResume = { buffer: Buffer; mimetype: string; originalname: string };
+type UploadedResume = { buffer: Buffer; mimetype: string; originalname: string };
 
 export async function parseResume(file: UploadedResume): Promise<ResumeData> {
   const isPdf = file.mimetype === "application/pdf" || file.originalname.toLowerCase().endsWith(".pdf");

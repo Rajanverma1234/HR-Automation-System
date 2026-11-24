@@ -1,4 +1,4 @@
-export const EMPTY = "—";
+const EMPTY = "—";
 
 export function display(value: string | number | null | undefined): string {
   if (value === null || value === undefined) return EMPTY;

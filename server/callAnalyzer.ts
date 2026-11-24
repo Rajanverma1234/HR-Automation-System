@@ -63,7 +63,7 @@ export const callAnalysisSchema: Schema = {
   propertyOrdering: ANALYSIS_KEYS,
 };
 
-export const systemInstruction = `You analyse an HR screening call transcript. Extract ONLY what the candidate actually said. If something was not discussed, return null. Never invent or assume values.
+const systemInstruction = `You analyse an HR screening call transcript. Extract ONLY what the candidate actually said. If something was not discussed, return null. Never invent or assume values.
 
 You are given the candidate's resume details (JSON extracted from their CV) and the call transcript. Lines starting "Agent:" are the AI screening agent; lines starting "Candidate:" are the candidate.
 

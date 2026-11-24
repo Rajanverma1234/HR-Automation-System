@@ -100,7 +100,7 @@ function callColumns(call: CallRecord, callNumber: number): CsvValue[] {
 
 const EMPTY_CALL_COLUMNS: CsvValue[] = new Array(HEADERS.length - 14).fill(null);
 
-export function buildExportRows(candidates: Candidate[]): CsvValue[][] {
+function buildExportRows(candidates: Candidate[]): CsvValue[][] {
   const rows: CsvValue[][] = [];
   for (const c of candidates) {
     const base = candidateColumns(c);

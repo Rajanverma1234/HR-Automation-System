@@ -3,7 +3,7 @@ import type { CallAnalysis, Candidate, ResumeData } from "../../shared/types";
 import { AGENT_NAME, COMPANY_NAME, JOB_ROLE, VAPI_MODEL } from "./vapiConfig";
 
 /** The overrides type accepted by vapi.start(assistantId, overrides). */
-export type AssistantOverrides = NonNullable<Parameters<Vapi["start"]>[1]>;
+type AssistantOverrides = NonNullable<Parameters<Vapi["start"]>[1]>;
 
 const NOT_MENTIONED = "not mentioned";
 const MAX_PROMPT_SKILLS = 20;
@@ -22,7 +22,7 @@ function firstNameOf(name: string | null): string | null {
 }
 
 /** Human-readable labels of key resume fields that are null. */
-export function missingResumeFields(r: ResumeData): string[] {
+function missingResumeFields(r: ResumeData): string[] {
   const checks: [unknown, string][] = [
     [r.currentCompany, "current company"],
     [r.currentDesignation, "current designation"],
@@ -77,7 +77,7 @@ function previousCallBlock(candidate: Candidate): string | null {
   return `KNOWN FROM PREVIOUS CALL (confirm these briefly instead of asking again):\n${lines.join("\n")}`;
 }
 
-export function buildSystemPrompt(candidate: Candidate): string {
+function buildSystemPrompt(candidate: Candidate): string {
   const r = candidate.resumeData;
   const name = r.name ?? "the candidate";
   const missing = missingResumeFields(r);
@@ -110,7 +110,7 @@ export function buildSystemPrompt(candidate: Candidate): string {
   ].join("\n");
 }
 
-export function buildFirstMessage(candidate: Candidate): string {
+function buildFirstMessage(candidate: Candidate): string {
   const first = firstNameOf(candidate.resumeData.name);
   const greeting = first ? `Hi ${first}` : "Hi there";
   return `${greeting}, this is ${AGENT_NAME} from ${COMPANY_NAME}'s HR team. I'm calling about ${JOB_ROLE}. Is this a good time to talk for about five minutes?`;
