@@ -29,20 +29,22 @@ export function buildDemoScript(candidate: Candidate): DemoScript {
   const first = firstNameOf(candidate.resumeData.name);
   const confirm = confirmQuestion(candidate);
   // "total years of experience" etc. are only asked when the resume didn't have them.
-  const missing = missingResumeFields(candidate.resumeData).map((label) => `Could you tell me your ${label}?`);
+  const missing = missingResumeFields(candidate.resumeData).map(
+    (label) => `I couldn't find your ${label} on the resume. Could you share that?`,
+  );
 
   return {
     greeting: buildFirstMessage(candidate),
     questions: [
       ...(confirm ? [confirm] : []),
       ...missing,
-      "What is your current CTC?",
-      "And what is your expected CTC?",
-      "What is your notice period, and is it negotiable?",
-      "Why are you looking for a change?",
-      "Which work location would you prefer?",
-      `Are you interested in ${JOB_ROLE}?`,
-      "When would you be available for an interview in the coming days?",
+      "So, could you tell me your current CTC?",
+      "And what are you expecting for this role?",
+      "What's your notice period? Is there any flexibility on that?",
+      "May I ask what's making you look for a change right now?",
+      "Which location would you prefer to work from?",
+      `And are you interested in ${JOB_ROLE}?`,
+      "Lovely. When would be a good time for an interview in the next few days?",
     ],
     closing: `Thank you${first ? `, ${first}` : ""}. That's everything I needed. The recruiter will get back to you soon. Have a great day, goodbye!`,
     callBack: "No problem. The recruiter will call you back at a better time. Thank you, goodbye!",

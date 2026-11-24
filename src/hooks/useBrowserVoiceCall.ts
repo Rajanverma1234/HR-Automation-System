@@ -40,6 +40,16 @@ type Options = { onEnded: (result: SaveCallRequest) => void };
 
 class Cancelled extends Error {}
 
+/** Short spoken acknowledgements, varied so consecutive turns don't sound identical. */
+const ACKNOWLEDGEMENTS = ["Got it.", "Okay, thank you.", "Great, thanks.", "Understood.", "Achha, okay.", "Alright.", "Perfect, thank you."];
+let lastAck = -1;
+function acknowledgement(): string {
+  let i = Math.floor(Math.random() * ACKNOWLEDGEMENTS.length);
+  if (i === lastAck) i = (i + 1) % ACKNOWLEDGEMENTS.length;
+  lastAck = i;
+  return ACKNOWLEDGEMENTS[i] ?? "Okay.";
+}
+
 async function pickVoice(): Promise<SpeechSynthesisVoice | null> {
   const synth = window.speechSynthesis;
   let voices = synth.getVoices();
@@ -54,7 +64,13 @@ async function pickVoice(): Promise<SpeechSynthesisVoice | null> {
     voices = synth.getVoices();
   }
   const female = /female|neerja|swara|heera|zira|aria|jenny|samantha|google uk english female/i;
+  // Edge ships free neural voices named "... Online (Natural)"; they sound far more human than the classic ones.
+  const natural = /natural/i;
   return (
+    voices.find((v) => v.lang === "en-IN" && natural.test(v.name) && female.test(v.name)) ??
+    voices.find((v) => v.lang === "en-IN" && natural.test(v.name)) ??
+    voices.find((v) => v.lang.startsWith("en") && natural.test(v.name) && female.test(v.name)) ??
+    voices.find((v) => v.lang.startsWith("en") && natural.test(v.name)) ??
     voices.find((v) => v.lang === "en-IN" && female.test(v.name)) ??
     voices.find((v) => v.lang === "en-IN") ??
     voices.find((v) => v.lang.startsWith("en") && female.test(v.name)) ??
@@ -138,7 +154,9 @@ export function useBrowserVoiceCall({ onEnded }: Options) {
         const u = new SpeechSynthesisUtterance(text);
         if (voiceRef.current) u.voice = voiceRef.current;
         u.lang = voiceRef.current?.lang ?? "en-IN";
-        u.rate = 1;
+        // Neural voices sound best at normal speed; slow classic voices down a touch so they sound less clipped.
+        u.rate = voiceRef.current && /natural/i.test(voiceRef.current.name) ? 1 : 0.92;
+        u.pitch = 1;
         u.onstart = () => setIsAgentSpeaking(true);
         const done = () => {
           setIsAgentSpeaking(false);
@@ -224,10 +242,10 @@ export function useBrowserVoiceCall({ onEnded }: Options) {
     [],
   );
 
-  /** Asks a question, re-asking once if there is no answer. */
+  /** Asks a question (optionally after a short lead-in like "Got it."), re-asking once if there is no answer. */
   const ask = useCallback(
-    async (question: string): Promise<string | null> => {
-      await speak(question);
+    async (question: string, lead = ""): Promise<string | null> => {
+      await speak(lead ? `${lead} ${question}` : question);
       let answer = await listen();
       if (answer === null) {
         await speak("Sorry, I didn't catch that. " + question);
@@ -312,8 +330,9 @@ export function useBrowserVoiceCall({ onEnded }: Options) {
         if (first !== null && isNotAGoodTime(first)) {
           await speak(script.callBack);
         } else {
-          for (const q of script.questions) await ask(q);
-          await speak(script.closing);
+          // The first question already opens with "Great."; later ones get a varied acknowledgement.
+          for (const [i, q] of script.questions.entries()) await ask(q, i === 0 ? "" : acknowledgement());
+          await speak(`${acknowledgement()} ${script.closing}`);
         }
         updateStatus("ended");
         finalize();
