@@ -54,7 +54,7 @@ An HR recruiter uploads a resume (PDF or DOCX). Gemini extracts structured candi
    VITE_VAPI_PUBLIC_KEY=your-vapi-public-key
    VITE_VAPI_ASSISTANT_ID=your-assistant-id
    # Optional: use a different Gemini model (default gemini-3.6-flash)
-   # GEMINI_MODEL=gemini-3.5-flash
+   # GEMINI_MODEL=gemini-3.5-flash-lite
    ```
 5. **Run**
    ```bash
@@ -230,7 +230,7 @@ How list columns are joined:
 | "Microphone permission was denied" | Click the lock icon in the address bar → Microphone → Allow, then **Try again**. Check that the OS privacy settings allow the browser to use the mic. |
 | "Microphone needs a secure context" | Open `http://localhost:3000`, not `http://192.168.x.x:3000`. Remote access needs HTTPS. |
 | Vapi banner still shows after editing `.env` | `VITE_` variables are read when the server starts. **Restart `npm run dev`** and hard-refresh the page. |
-| Upload says "overloaded" / 502 `GEMINI_OVERLOADED`, or requests time out | Google is returning 503 (high demand). Wait a minute and retry. If it persists, set `GEMINI_MODEL` in `.env` to another Flash model available to your key (e.g. `gemini-3.5-flash`) and restart. |
+| Upload says "overloaded" / 502 `GEMINI_OVERLOADED`, or requests time out | Google is returning 503 (high demand). Wait a minute and retry. If it persists, set `GEMINI_MODEL` in `.env` to another Flash model available to your key and restart. `gemini-3.5-flash-lite` is the fastest fallback (~8 s per resume, all e2e checks pass); `gemini-3.5-flash` can exceed the 60 s timeout under load. |
 | 429 `GEMINI_RATE_LIMIT` | The free-tier quota is exhausted. Wait, or use a key with a higher quota. |
 | Upload or analysis 404 mentioning the model | Your key can't use the configured model. Set `GEMINI_MODEL` in `.env` to a model listed for your key in AI Studio, then restart. |
 | Call fails to start, or errors mentioning model/overrides | `VAPI_MODEL` in `src/lib/vapiConfig.ts` doesn't match a provider/model enabled on your Vapi account. Make it match your assistant's model. |
