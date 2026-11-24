@@ -1,5 +1,7 @@
 import { Type, type Schema } from "@google/genai";
-import type { CallAnalysis, Candidate, ResumeDetailCheck, TranscriptLine } from "../shared/types.js";
+import { OFFICE_TIME_ZONE } from "../shared/company.js";
+import { addDays, calendarLines, isValidHm, isValidYmd, officeDate, officeTime, spokenDate } from "../shared/interview.js";
+import type { CallAnalysis, Candidate, InterviewSlot, ResumeDetailCheck, TranscriptLine } from "../shared/types.js";
 import { generateJson } from "./gemini.js";
 import { cleanEnum, cleanString, cleanStringArray, isRecord, asArray } from "./normalize.js";
 
@@ -17,11 +19,17 @@ const ANALYSIS_KEYS = [
   "preferredLocation",
   "interested",
   "interviewAvailability",
+  "interviewSlot",
   "confirmedOrCorrectedResumeDetails",
   "keyNotes",
   "callSummary",
   "recommendation",
 ];
+
+const SLOT_KEYS = ["date", "time", "candidateStatement"];
+
+/** How far ahead an AI-scheduled interview may be; anything later is treated as a misheard date. */
+const MAX_DAYS_AHEAD = 60;
 
 export const callAnalysisSchema: Schema = {
   type: Type.OBJECT,
@@ -33,6 +41,17 @@ export const callAnalysisSchema: Schema = {
     preferredLocation: nullableString,
     interested: { type: Type.STRING, format: "enum", enum: [...INTERESTED] },
     interviewAvailability: nullableString,
+    interviewSlot: {
+      type: Type.OBJECT,
+      nullable: true,
+      properties: {
+        date: { type: Type.STRING, description: "YYYY-MM-DD, taken from the CALENDAR" },
+        time: { type: Type.STRING, nullable: true, description: "HH:MM, 24-hour, office time" },
+        candidateStatement: nullableString,
+      },
+      required: SLOT_KEYS,
+      propertyOrdering: SLOT_KEYS,
+    },
     confirmedOrCorrectedResumeDetails: {
       type: Type.ARRAY,
       items: {
@@ -77,7 +96,8 @@ Field rules:
 - reasonForChange: the candidate's stated reason for looking for a new role, briefly. null if not stated.
 - preferredLocation: the work location(s) the candidate said they prefer, including remote/hybrid preferences. null if not stated.
 - interested: "yes" or "no" only if the candidate clearly expressed it; "maybe" if unclear or not asked.
-- interviewAvailability: when the candidate said they are available for an interview. null if not stated.
+- interviewAvailability: when the candidate said they are available for an interview, in their words. null if not stated.
+- interviewSlot: the interview day (and time, if given) the candidate agreed to or asked for, e.g. "theek hai mam, kal 3 baje schedule kar do", "tomorrow works", "Thursday after 2 pm", "25 tarikh ko". Resolve relative days ONLY with the CALENDAR you are given (its first line is the day of the call): "kal" in a scheduling context means tomorrow, "parso" the day after tomorrow, a weekday name means the next such day in the calendar (not today). "date" must be copied from the calendar as YYYY-MM-DD. "time" is 24-hour HH:MM in office time ("3 baje"/"3 pm" → "15:00", "subah 11" → "11:00", "after 2 pm" → "14:00", "afternoon" with no hour → null); a bare hour from 1 to 7 means pm. "candidateStatement" quotes what they said briefly. Return null when no specific day was agreed (e.g. "any weekday", "next week sometime", "I'll let you know"), when the candidate declined or is not interested, or when the date is in the past.
 - confirmedOrCorrectedResumeDetails: one entry per resume detail the agent asked the candidate to confirm. "field" is a short human-readable label (e.g. "Current designation", "Total experience"). "resumeValue" is the value from the resume JSON as a string (null if the resume has no value). "candidateStatement" is what the candidate said, briefly (null if they did not answer). "status" is "confirmed" if the candidate agreed, "corrected" if they gave a different value, "unclear" if the answer was ambiguous or missing. Return [] if no resume details were checked.
 - keyNotes: 3-6 short points a recruiter should know, based only on the call. Fewer is fine if the call was very short.
 - callSummary: 3-5 neutral sentences summarising the call.
@@ -87,9 +107,14 @@ function formatTranscript(transcript: TranscriptLine[]): string {
   return transcript.map((line) => `${line.role === "assistant" ? "Agent" : "Candidate"}: ${line.text}`).join("\n");
 }
 
-export async function analyseCall(candidate: Candidate, transcript: TranscriptLine[]): Promise<CallAnalysis> {
+/** `callStartedAt` anchors relative dates ("tomorrow") to the day of the call, not the day of analysis. */
+export async function analyseCall(candidate: Candidate, transcript: TranscriptLine[], callStartedAt: Date): Promise<CallAnalysis> {
   const prompt = [
     "Analyse this screening call according to your rules.",
+    "",
+    `CALL TIME: ${spokenDate(officeDate(callStartedAt))}, ${officeTime(callStartedAt)} (${OFFICE_TIME_ZONE}).`,
+    "CALENDAR (office time zone; first line is the day of the call):",
+    ...calendarLines(callStartedAt, 21),
     "",
     "RESUME DETAILS (JSON):",
     JSON.stringify(candidate.resumeData, null, 2),
@@ -103,10 +128,25 @@ export async function analyseCall(candidate: Candidate, transcript: TranscriptLi
     schema: callAnalysisSchema,
     systemInstruction,
   });
-  return normalizeCallAnalysis(raw);
+  return normalizeCallAnalysis(raw, callStartedAt);
 }
 
-export function normalizeCallAnalysis(raw: unknown): CallAnalysis {
+/** Keeps a slot only if it is a real date between the call day and MAX_DAYS_AHEAD after it. */
+function normalizeSlot(raw: unknown, callStartedAt: Date): InterviewSlot | null {
+  if (!isRecord(raw)) return null;
+  const date = cleanString(raw.date);
+  if (date === null || !isValidYmd(date)) return null;
+  const callDay = officeDate(callStartedAt);
+  if (date < callDay || date > addDays(callDay, MAX_DAYS_AHEAD)) return null;
+  const time = cleanString(raw.time);
+  return {
+    date,
+    time: time !== null && isValidHm(time) ? time : null,
+    candidateStatement: cleanString(raw.candidateStatement),
+  };
+}
+
+export function normalizeCallAnalysis(raw: unknown, callStartedAt: Date): CallAnalysis {
   const r = isRecord(raw) ? raw : {};
   const rec = isRecord(r.recommendation) ? r.recommendation : {};
 
@@ -132,6 +172,7 @@ export function normalizeCallAnalysis(raw: unknown): CallAnalysis {
     preferredLocation: cleanString(r.preferredLocation),
     interested: cleanEnum(r.interested, INTERESTED, "maybe"),
     interviewAvailability: cleanString(r.interviewAvailability),
+    interviewSlot: normalizeSlot(r.interviewSlot, callStartedAt),
     confirmedOrCorrectedResumeDetails: details,
     keyNotes: cleanStringArray(r.keyNotes),
     // Required strings in the type: fall back to explicit "no data" wording rather than inventing content.

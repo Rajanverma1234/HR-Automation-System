@@ -68,7 +68,12 @@ export class JsonFileCandidateRepository implements CandidateRepository {
     }
     if (!isStoreFile(parsed)) throw corrupted();
     // Records saved before `appliedRole` existed: treat the missing field as null.
-    for (const c of parsed.candidates) c.resumeData.appliedRole ??= null;
+    // Same for `interview` and `interviewSlot`, added later still.
+    for (const c of parsed.candidates) {
+      c.resumeData.appliedRole ??= null;
+      c.interview ??= null;
+      for (const call of c.calls) if (call.analysis) call.analysis.interviewSlot ??= null;
+    }
     return parsed;
   }
 
@@ -110,6 +115,7 @@ export class JsonFileCandidateRepository implements CandidateRepository {
         resumeData: input.resumeData,
         status: "new",
         calls: [],
+        interview: null,
       };
       store.candidates.push(candidate);
       await this.save(store);

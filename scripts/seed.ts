@@ -64,6 +64,7 @@ if (process.argv.includes("--with-call")) {
       preferredLocation: "Pune or remote",
       interested: "yes",
       interviewAvailability: "Any weekday after 4 pm",
+      interviewSlot: null,
       confirmedOrCorrectedResumeDetails: [
         { field: "Current designation", resumeValue: "Senior Software Engineer", candidateStatement: "Senior Software Engineer", status: "confirmed" },
         { field: "Current company", resumeValue: "Acme Fictional Foods Pvt Ltd", candidateStatement: "Acme Fictional Foods", status: "confirmed" },

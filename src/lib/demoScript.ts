@@ -44,9 +44,9 @@ export function buildDemoScript(candidate: Candidate): DemoScript {
       "May I ask what's making you look for a change right now?",
       `This role is based at ${OFFICE_LOCATION}. Would working from there be comfortable for you?`,
       `And are you interested in ${jobRoleFor(candidate.resumeData.appliedRole)}?`,
-      "Lovely. When would be a good time for an interview in the next few days?",
+      "Lovely. Which day and time would suit you for an interview at our Gurgaon office? For example, tomorrow at 11 AM.",
     ],
-    closing: `Thank you${first ? `, ${first}` : ""}. That's everything I needed. The recruiter will get back to you soon. Have a great day, goodbye!`,
+    closing: `Thank you${first ? `, ${first}` : ""}. That's everything I needed. I've noted your interview slot, and it will appear as scheduled in our system once this call ends. The recruiter will share the details. Have a great day, goodbye!`,
     callBack: "No problem. The recruiter will call you back at a better time. Thank you, goodbye!",
   };
 }

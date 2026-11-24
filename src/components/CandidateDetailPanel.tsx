@@ -6,12 +6,15 @@ import { display, formatExperience, initials } from "../lib/format";
 import { lockBodyScroll } from "../lib/scrollLock";
 import CallHistory from "./CallHistory";
 import DeleteCandidateDialog from "./DeleteCandidateDialog";
+import InterviewSection from "./InterviewSection";
 
 type Props = {
   candidateId: string;
   onClose: () => void;
   onCall: (candidate: Candidate) => void;
   onDeleted: (id: string) => void;
+  /** The candidate changed in the panel (e.g. the interview was edited). */
+  onUpdated: (candidate: Candidate) => void;
   /** Change this number to force a refetch (e.g. after a call is saved). */
   refreshKey: number;
   callDisabled?: boolean;
@@ -28,6 +31,7 @@ export default function CandidateDetailPanel({
   onClose,
   onCall,
   onDeleted,
+  onUpdated,
   refreshKey,
   callDisabled = false,
   callDisabledReason,
@@ -123,6 +127,10 @@ export default function CandidateDetailPanel({
               onDelete={() => setConfirmDelete(state.candidate)}
               callDisabled={callDisabled}
               callDisabledReason={callDisabledReason}
+              onUpdated={(candidate) => {
+                setState({ kind: "ready", candidate });
+                onUpdated(candidate);
+              }}
             />
           )}
         </div>
@@ -146,10 +154,12 @@ function PanelBody({
   onDelete,
   callDisabled,
   callDisabledReason,
+  onUpdated,
 }: {
   candidate: Candidate;
   onCall: (candidate: Candidate) => void;
   onDelete: () => void;
+  onUpdated: (candidate: Candidate) => void;
   callDisabled: boolean;
   callDisabledReason: string | undefined;
 }) {
@@ -208,6 +218,10 @@ function PanelBody({
           </button>
         </div>
       </section>
+
+      <Section title="Interview">
+        <InterviewSection candidate={candidate} onUpdated={onUpdated} />
+      </Section>
 
       <Section title="Contact">
         <dl className="flex flex-col gap-2 text-sm">

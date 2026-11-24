@@ -27,5 +27,12 @@ export function jobRoleFor(appliedRole: string | null): string {
   return m ? `${base} in our ${m[2].replace(/\bTeam$/, "team")}` : base;
 }
 
+/** Interview dates and times are in the office's time zone (India does not use daylight saving). */
+export const OFFICE_TIME_ZONE = "Asia/Kolkata";
+export const OFFICE_UTC_OFFSET = "+05:30";
+
+/** Used when the candidate agrees to a day but not a time. */
+export const DEFAULT_INTERVIEW_TIME = "11:00";
+
 /** LLM used by the Vapi assistant for this call. Must match a provider/model enabled on your Vapi account. */
 export const VAPI_MODEL = { provider: "openai", model: "gpt-4o" } as const;

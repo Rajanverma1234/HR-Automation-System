@@ -1,4 +1,4 @@
-import type { SaveCallRequest, TranscriptLine } from "../shared/types.js";
+import type { InterviewStatus, SaveCallRequest, TranscriptLine, UpdateInterviewRequest } from "../shared/types.js";
 import { AppError } from "./errors.js";
 import { isRecord } from "./normalize.js";
 
@@ -13,6 +13,37 @@ function invalid(message: string): AppError {
 
 function isIsoDate(value: unknown): value is string {
   return typeof value === "string" && ISO_DATE_RE.test(value) && !Number.isNaN(Date.parse(value));
+}
+
+const INTERVIEW_STATUSES: readonly InterviewStatus[] = ["scheduled", "completed", "no-show", "cancelled"];
+const MAX_NOTES_CHARS = 2000;
+
+export function validateUpdateInterviewRequest(body: unknown): UpdateInterviewRequest {
+  if (!isRecord(body)) throw invalid("Request body must be a JSON object.");
+  const { scheduledAt, timeSpecified, status, notes } = body;
+  const out: UpdateInterviewRequest = {};
+
+  if (scheduledAt !== undefined) {
+    if (!isIsoDate(scheduledAt)) throw invalid("scheduledAt must be an ISO date string.");
+    out.scheduledAt = new Date(scheduledAt).toISOString();
+  }
+  if (timeSpecified !== undefined) {
+    if (typeof timeSpecified !== "boolean") throw invalid("timeSpecified must be a boolean.");
+    out.timeSpecified = timeSpecified;
+  }
+  if (status !== undefined) {
+    if (typeof status !== "string" || !(INTERVIEW_STATUSES as readonly string[]).includes(status)) {
+      throw invalid(`status must be one of: ${INTERVIEW_STATUSES.join(", ")}.`);
+    }
+    out.status = status as InterviewStatus;
+  }
+  if (notes !== undefined) {
+    if (notes !== null && typeof notes !== "string") throw invalid("notes must be a string or null.");
+    if (typeof notes === "string" && notes.length > MAX_NOTES_CHARS) throw invalid(`notes must be at most ${MAX_NOTES_CHARS} characters.`);
+    out.notes = typeof notes === "string" && notes.trim() !== "" ? notes.trim() : null;
+  }
+  if (Object.keys(out).length === 0) throw invalid("Nothing to update: send scheduledAt, timeSpecified, status or notes.");
+  return out;
 }
 
 export function validateSaveCallRequest(body: unknown): SaveCallRequest {

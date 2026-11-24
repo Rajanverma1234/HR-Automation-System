@@ -9,6 +9,7 @@ An HR recruiter uploads a resume (PDF or DOCX). Gemini extracts structured candi
 - **Detail panel**: full resume data plus the call history, with the analysis, resume-detail checks and transcript for each call.
 - **Browser voice screening**: a Vapi web call with a per-candidate system prompt. It confirms resume details, asks for anything missing, collects CTC and notice period, and closes politely. It shows a live transcript, a timer and an "agent speaking" indicator.
 - **Call analysis**: a structured `CallAnalysis` from Gemini, with a shortlist/hold/reject recommendation. If analysis fails, the transcript is still saved.
+- **Automatic interview scheduling**: when the candidate agrees to a day on the call ("theek hai mam, kal 3 baje schedule kar do", "Thursday after 2 pm"), the interview is booked with no recruiter step. Relative days are resolved against the real date of the call (IST). The dashboard shows Scheduled / Today / **Overdue** / Completed / No-show / Cancelled, and the recruiter can mark the outcome or reschedule. See [Interview scheduling](#interview-scheduling).
 - **Follow-up calls** reuse answers from the previous call ("confirm these briefly instead of asking again").
 - **CSV export**: one row per call, Excel-friendly (UTF-8 BOM, ₹ and Devanagari intact) and protected against formula injection.
 - Clear error states throughout. The layout works on mobile at 375 px and is keyboard accessible.
@@ -95,7 +96,8 @@ An HR recruiter uploads a resume (PDF or DOCX). Gemini extracts structured candi
 ├── shared/
 │   ├── types.ts              # Types shared by server and browser
 │   ├── agentPrompt.ts        # Per-candidate Vapi assistantOverrides (prompt, first message, variables)
-│   └── company.ts            # Agent/company facts, jobRoleFor(), VAPI_MODEL
+│   ├── company.ts            # Agent/company facts, jobRoleFor(), VAPI_MODEL, office time zone
+│   └── interview.ts          # IST date helpers, calendar for the LLMs, interviewState() (upcoming/today/overdue/…)
 ├── src/
 │   ├── main.tsx, App.tsx, index.css, api.ts, vite-env.d.ts
 │   ├── components/           # UploadDropzone, CandidateGrid/Card, Toolbar, CandidateDetailPanel,
@@ -117,6 +119,8 @@ Every error is JSON `{ "error": string, "code"?: string }` with a matching HTTP 
 | `GET /api/candidates` | — | `200 Candidate[]`, newest first | 500 `DATA_CORRUPT` |
 | `GET /api/candidates/:id` | — | `200 Candidate` | 404 `NOT_FOUND` |
 | `DELETE /api/candidates/:id` | — | `204` (no body) | 404 `NOT_FOUND` |
+| `PATCH /api/candidates/:id/interview` | JSON `UpdateInterviewRequest`: any of `scheduledAt` (ISO), `timeSpecified`, `status` (`scheduled`/`completed`/`no-show`/`cancelled`), `notes` | `200 Candidate` (creates the interview if none; that needs `scheduledAt`) | 400 `INVALID_BODY`, 404 `NOT_FOUND` |
+| `DELETE /api/candidates/:id/interview` | — | `200 Candidate` with `interview: null` | 404 `NOT_FOUND` |
 | `POST /api/resume` | `multipart/form-data`, field `resume` (PDF/DOCX ≤ 5 MB) | `201 Candidate` | 400 `NO_FILE`, 413 `LIMIT_FILE_SIZE`, 415 `UNSUPPORTED_FILE`, 422 `EMPTY_DOCUMENT` / `NOT_A_RESUME`, 429, 502, 503 |
 | `POST /api/candidates/:id/calls` | JSON `SaveCallRequest` | `201 { candidate, call }` | 400 `INVALID_BODY`, 404 `NOT_FOUND` |
 | `GET /api/export.csv` | — | `200 text/csv`, `attachment; filename="candidates-YYYY-MM-DD.csv"` | 500 `DATA_CORRUPT` |
@@ -181,10 +185,11 @@ curl -s -X DELETE -w "%{http_code}\n" http://localhost:3000/api/candidates/<id> 
 
 All types live in [shared/types.ts](shared/types.ts) and are shared by server and client:
 
-- `Candidate` holds `{ id, createdAt, updatedAt, resumeFileName, resumeData: ResumeData, status: "new" | "called", calls: CallRecord[] }`.
+- `Candidate` holds `{ id, createdAt, updatedAt, resumeFileName, resumeData: ResumeData, status: "new" | "called", calls: CallRecord[], interview: Interview | null }`.
+- `Interview` holds `{ scheduledAt, timeSpecified, status: "scheduled" | "completed" | "no-show" | "cancelled", source: "ai" | "recruiter", callRecordId, candidateStatement, notes }`. "Overdue" is never stored; it is derived from the clock.
 - `ResumeData` holds the extracted resume fields. Missing scalars are `null` and missing lists are `[]`.
 - `CallRecord` holds one call: the Vapi `callId`, timings, the `TranscriptLine[]`, and `analysis: CallAnalysis | null` with `analysisError`.
-- `CallAnalysis` holds the CTC, notice period, reason for change, location, interest, availability, resume-detail checks, key notes, summary and recommendation.
+- `CallAnalysis` holds the CTC, notice period, reason for change, location, interest, availability, `interviewSlot` (`{ date, time, candidateStatement } | null`), resume-detail checks, key notes, summary and recommendation.
 
 Conventions: ISO date strings, ids from `crypto.randomUUID()`, and `null` (never `""`) for missing values.
 
@@ -198,6 +203,17 @@ Conventions: ISO date strings, ids from `crypto.randomUUID()`, and `null` (never
 - **Follow-up calls**: if the candidate has an analysed earlier call, its non-null answers are added as "KNOWN FROM PREVIOUS CALL (confirm these briefly instead of asking again)".
 - **Language**: the agent replies in the candidate's language (English, Hindi or Hinglish). The analysis is always written in English, with amounts kept as said ("18 LPA").
 - **Transcript capture**: [useVapiCall](src/hooks/useVapiCall.ts) shows partial transcripts live (faded) but stores **only `final` transcript messages**. When the call ends, by either side or by an error mid-call, the captured transcript is posted exactly once to `POST /api/candidates/:id/calls` for analysis.
+
+## Interview scheduling
+
+1. **On the call**, the agent's prompt includes today's date and a two-week calendar (with "aaj / kal / parso"). When the candidate is interested, the agent asks for a day and time (in person at the Gurgaon office), repeats the exact date back ("So that's Wednesday, 25 November 2026 at 3 PM, correct?") and confirms that it's booked. On a follow-up call it confirms an existing slot or books a new one.
+2. **When the call ends**, Gemini's analysis receives the call's start time and a three-week calendar. It returns `interviewSlot`: a `YYYY-MM-DD` date copied from that calendar, so it never has to work out weekdays itself, plus `HH:MM` if a time was given ("3 baje" → 15:00, a bare 1–7 means pm). Vague answers ("any weekday", "next week sometime") give `null`. The server rejects dates before the call day or more than 60 days after it.
+3. **The server schedules it immediately** (`source: "ai"`). A newer call that books a different slot replaces the interview; a call with no slot leaves it unchanged.
+4. **On the dashboard**, the card and the detail panel show the interview and its state, computed in IST and refreshed every 30 s:
+   - **Scheduled**: in the future. **Today**: later today.
+   - **Overdue**: still `scheduled`, but its time passed more than an hour ago. If only a day was agreed, it becomes overdue once that day ends. A red banner and an "Overdue" filter list these interviews.
+   - **Completed / No-show / Cancelled**: set by the recruiter.
+5. **Recruiter actions** in the detail panel: Mark completed, No-show, Mark as due again, Reschedule (date plus an optional time), Cancel, Remove, or Schedule manually when there's no interview.
 
 ## Free demo mode (no Vapi keys)
 
@@ -214,7 +230,7 @@ Limitations: it is not conversational (no follow-ups or free-form replies), and 
 
 There is one row per call. A candidate without calls gets one row with empty call columns. Columns, in order:
 
-`candidateId, name, email, phone, location, currentCompany, currentDesignation, totalExperienceYears, skills, education, previousCompanies, resumeSummary, status, candidateCreatedAt, callNumber, callId, callStartedAt, callDurationSec, currentCTC, expectedCTC, noticePeriod, reasonForChange, preferredLocation, interested, interviewAvailability, resumeDetailChecks, keyNotes, callSummary, recommendation, recommendationReason, analysisError, transcript`
+`candidateId, name, appliedRole, email, phone, location, currentCompany, currentDesignation, totalExperienceYears, skills, education, previousCompanies, resumeSummary, status, candidateCreatedAt, interviewAt, interviewStatus, interviewScheduledBy, callNumber, callId, callStartedAt, callDurationSec, currentCTC, expectedCTC, noticePeriod, reasonForChange, preferredLocation, interested, interviewAvailability, resumeDetailChecks, keyNotes, callSummary, recommendation, recommendationReason, analysisError, transcript`
 
 How list columns are joined:
 

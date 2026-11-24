@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { CallAnalysis, CallRecord, Candidate, SaveCallRequest } from "../shared/types.js";
+import { slotToIso } from "../shared/interview.js";
+import type { CallAnalysis, CallRecord, Candidate, Interview, SaveCallRequest } from "../shared/types.js";
 import { analyseCall } from "./callAnalyzer.js";
 import { AppError } from "./errors.js";
 import { candidateRepository } from "./repository.js";
@@ -27,7 +28,7 @@ export async function recordCall(candidateId: string, body: SaveCallRequest): Pr
     analysisError = NO_SPEECH_ERROR;
   } else {
     try {
-      analysis = await analyseCall(candidate, body.transcript);
+      analysis = await analyseCall(candidate, body.transcript, new Date(body.startedAt));
     } catch (err) {
       if (err instanceof AppError) {
         analysisError = err.message;
@@ -50,10 +51,29 @@ export async function recordCall(candidateId: string, body: SaveCallRequest): Pr
     createdAt: new Date().toISOString(),
   };
 
+  // No human step: a slot the candidate agreed to on the call becomes the candidate's interview straight away.
+  // The newest agreement wins, so a later call that reschedules replaces the previous interview.
+  const slot = analysis?.interviewSlot ?? null;
+  const interview: Interview | null = slot
+    ? {
+        id: randomUUID(),
+        scheduledAt: slotToIso(slot.date, slot.time),
+        timeSpecified: slot.time !== null,
+        status: "scheduled",
+        source: "ai",
+        callRecordId: call.id,
+        candidateStatement: slot.candidateStatement,
+        notes: null,
+        createdAt: call.createdAt,
+        updatedAt: call.createdAt,
+      }
+    : null;
+
   const updated = await candidateRepository.update(candidate.id, (c) => ({
     ...c,
     status: "called",
     calls: [...c.calls, call],
+    interview: interview ?? c.interview,
   }));
   // The candidate was deleted while Gemini was running.
   if (!updated) throw candidateNotFound();

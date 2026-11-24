@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { addDays, formatInterviewWhen, interviewState, officeDate, slotToIso, weekdayOf } from "../shared/interview.js";
 import type { ApiErrorBody, CallRecord, Candidate, SaveCallRequest, TranscriptLine } from "../shared/types.js";
 
 const BASE_URL = (process.env.BASE_URL ?? "http://localhost:3000").replace(/\/$/, "");
@@ -182,6 +183,23 @@ async function main(): Promise<void> {
     `a resume detail is "corrected" (${corrected.map((d) => `${d.field}: ${d.resumeValue} → ${d.candidateStatement}`).join("; ")})`,
     JSON.stringify(a.confirmedOrCorrectedResumeDetails),
   );
+  // "Thursday afternoon works, after 2 pm" → the next Thursday after the call day, 14:00 office time.
+  const callDay = officeDate(new Date(payload.startedAt));
+  const thursday = [1, 2, 3, 4, 5, 6, 7].map((i) => addDays(callDay, i)).find((d) => weekdayOf(d) === "Thursday") ?? "";
+  check(
+    a.interviewSlot?.date === thursday && a.interviewSlot.time === "14:00",
+    `interviewSlot resolved to next Thursday ${thursday} 14:00 (got ${JSON.stringify(a.interviewSlot)})`,
+  );
+  const firstInterview = savedBody.candidate.interview;
+  check(
+    firstInterview !== null &&
+      firstInterview.status === "scheduled" &&
+      firstInterview.source === "ai" &&
+      firstInterview.callRecordId === savedBody.call.id &&
+      firstInterview.scheduledAt === slotToIso(thursday, "14:00"),
+    "interview scheduled automatically from the call (no human step)",
+    JSON.stringify(firstInterview),
+  );
 
   // 6. Persisted on disk
   const store = JSON.parse(await readFile(DATA_FILE, "utf8")) as { candidates: Candidate[] };
@@ -202,6 +220,64 @@ async function main(): Promise<void> {
   const secondBody = (await readJson(second)) as { candidate: Candidate; call: CallRecord };
   check(second.status === 201 && secondBody.candidate.calls.length === 2, "second call saved → calls.length === 2");
   check(secondBody.call.analysisError !== null, "assistant-only call saved with analysisError");
+  check(secondBody.candidate.interview?.id === firstInterview.id, "a call without a slot keeps the existing interview");
+
+  // 7b. "kal 3 baje" (Hinglish, relative day) → reschedules to tomorrow 15:00 automatically
+  const kalStart = new Date();
+  const at = (sec: number) => new Date(kalStart.getTime() + sec * 1000).toISOString();
+  const kalTranscript: TranscriptLine[] = [
+    { role: "assistant", at: at(0), text: "Hi Rahul, Priya here from White Collar Realty. You had a Thursday interview, does that still work?" },
+    { role: "user", at: at(6), text: "Actually Thursday mushkil hai. Theek hai mam, kal 3 baje mera interview schedule kar do." },
+    { role: "assistant", at: at(12), text: "Sure. So that's tomorrow at 3 PM, correct?" },
+    { role: "user", at: at(16), text: "Haan, correct. Thank you." },
+    { role: "assistant", at: at(20), text: "Done, your interview is scheduled. Goodbye!" },
+  ];
+  const kal = await postWithRetry(
+    `${BASE_URL}/api/candidates/${candidate.id}/calls`,
+    () => ({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ callId: "e2e-test-call-3", startedAt: at(0), endedAt: at(25), durationSec: 25, transcript: kalTranscript }),
+    }),
+    "kal call",
+  );
+  const kalBody = kal.body as { candidate: Candidate; call: CallRecord };
+  const tomorrow = addDays(officeDate(kalStart), 1);
+  check(
+    kal.res.status === 201 && kalBody.call.analysis?.interviewSlot?.date === tomorrow && kalBody.call.analysis.interviewSlot.time === "15:00",
+    `"kal 3 baje" → slot ${tomorrow} 15:00 (got ${JSON.stringify(kalBody.call.analysis?.interviewSlot ?? kalBody)})`,
+  );
+  const kalInterview = kalBody.candidate.interview;
+  check(
+    kalInterview !== null && kalInterview.id !== firstInterview.id && kalInterview.scheduledAt === slotToIso(tomorrow, "15:00") && kalInterview.status === "scheduled",
+    `interview rescheduled automatically to ${formatInterviewWhen({ scheduledAt: slotToIso(tomorrow, "15:00"), timeSpecified: true })}`,
+  );
+
+  // 7c. Recruiter edits
+  const patch = (body: unknown) =>
+    fetch(`${BASE_URL}/api/candidates/${candidate.id}/interview`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  const doneRes = await patch({ status: "completed" });
+  const done = (await readJson(doneRes)) as Candidate;
+  check(doneRes.status === 200 && done.interview?.status === "completed" && done.interview.source === "recruiter", "PATCH status completed → 200, recruiter-set");
+  const badStatus = await patch({ status: "maybe" });
+  const badStatusBody = await readJson(badStatus);
+  check(badStatus.status === 400 && isApiError(badStatusBody), "PATCH invalid status → 400 JSON error", JSON.stringify(badStatusBody));
+  const yesterday = slotToIso(addDays(officeDate(new Date()), -1), "11:00");
+  const pastRes = await patch({ scheduledAt: yesterday, timeSpecified: true, status: "scheduled" });
+  const past = (await readJson(pastRes)) as Candidate;
+  check(
+    pastRes.status === 200 && past.interview !== null && interviewState(past.interview, new Date()) === "overdue",
+    "interview dated yesterday and still scheduled → overdue",
+  );
+  check(
+    interviewState({ scheduledAt: slotToIso(officeDate(new Date()), null), timeSpecified: false, status: "scheduled" }, new Date()) === "today" &&
+      interviewState({ scheduledAt: slotToIso(addDays(officeDate(new Date()), 2), "10:00"), timeSpecified: true, status: "scheduled" }, new Date()) === "upcoming",
+    "day-only interview today → today; in 2 days → upcoming",
+  );
 
   // 8. CSV export
   const csvRes = await fetch(`${BASE_URL}/api/export.csv`);
@@ -212,8 +288,17 @@ async function main(): Promise<void> {
   const header = rows[0] ?? [];
   const idCol = header.indexOf("candidateId");
   const mine = rows.slice(1).filter((row) => row[idCol] === candidate.id);
-  check(mine.length === 2, `CSV has exactly 2 rows for this candidate (found ${mine.length})`);
+  check(mine.length === 3, `CSV has exactly 3 rows for this candidate (found ${mine.length})`);
   check(rows.slice(1).every((row) => row.length === header.length), `every CSV row has ${header.length} columns`);
+  const ivCol = header.indexOf("interviewStatus");
+  check(mine.every((row) => row[ivCol] === "overdue"), `CSV interviewStatus is "overdue" (${mine[0]?.[ivCol]})`);
+
+  // 8b. Remove the interview
+  const delIv = await fetch(`${BASE_URL}/api/candidates/${candidate.id}/interview`, { method: "DELETE" });
+  const delIvBody = (await readJson(delIv)) as Candidate;
+  check(delIv.status === 200 && delIvBody.interview === null, "DELETE interview → 200, interview null");
+  const noIv = await patch({ status: "completed" });
+  check(noIv.status === 400 && isApiError(await readJson(noIv)), "PATCH status without an interview → 400");
 
   // 9. Negative: .txt upload
   const bad = new FormData();

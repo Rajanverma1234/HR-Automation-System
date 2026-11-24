@@ -1,4 +1,4 @@
-import type { ApiErrorBody, CallRecord, Candidate, SaveCallRequest } from "../shared/types";
+import type { ApiErrorBody, CallRecord, Candidate, SaveCallRequest, UpdateInterviewRequest } from "../shared/types";
 
 export type HealthResponse = { ok: boolean; geminiConfigured: boolean };
 
@@ -92,6 +92,19 @@ export function saveCall(candidateId: string, payload: SaveCallRequest): Promise
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+}
+
+/** Marks the interview completed / no-show / cancelled, reschedules it, or creates one (needs scheduledAt). */
+export function updateInterview(candidateId: string, payload: UpdateInterviewRequest): Promise<Candidate> {
+  return request<Candidate>(`/api/candidates/${encodeURIComponent(candidateId)}/interview`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteInterview(candidateId: string): Promise<Candidate> {
+  return request<Candidate>(`/api/candidates/${encodeURIComponent(candidateId)}/interview`, { method: "DELETE" });
 }
 
 export function errorMessage(err: unknown): string {

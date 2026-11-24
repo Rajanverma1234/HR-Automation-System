@@ -4,6 +4,7 @@ import CandidateCard from "./CandidateCard";
 
 type Props = {
   candidates: Candidate[];
+  now: Date;
   loading: boolean;
   onOpen: (candidate: Candidate) => void;
   onCall: (candidate: Candidate) => void;
@@ -16,6 +17,7 @@ const GRID = "grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3";
 
 export default function CandidateGrid({
   candidates,
+  now,
   loading,
   onOpen,
   onCall,
@@ -48,6 +50,7 @@ export default function CandidateGrid({
         <CandidateCard
           key={c.id}
           candidate={c}
+          now={now}
           onOpen={onOpen}
           onCall={onCall}
           onDelete={onDelete}

@@ -1,4 +1,5 @@
 import { AGENT_NAME, COMPANY_FACTS, COMPANY_NAME, OFFICE_LOCATION, VAPI_MODEL, jobRoleFor } from "./company.js";
+import { addDays, calendarLines, formatInterviewWhen, officeDate, officeTime, spokenDate } from "./interview.js";
 import type { CallAnalysis, Candidate, ResumeData } from "./types.js";
 
 /**
@@ -89,7 +90,9 @@ function previousCallBlock(candidate: Candidate): string | null {
   return `KNOWN FROM PREVIOUS CALL (confirm these briefly instead of asking again):\n${lines.join("\n")}`;
 }
 
-function buildSystemPrompt(candidate: Candidate): string {
+function buildSystemPrompt(candidate: Candidate, now: Date): string {
+  const today = officeDate(now);
+  const tomorrow = addDays(today, 1);
   const r = candidate.resumeData;
   const name = r.name ?? "the candidate";
   const missing = missingResumeFields(r);
@@ -111,13 +114,22 @@ function buildSystemPrompt(candidate: Candidate): string {
     "",
     `MISSING FROM RESUME: ${missing.length > 0 ? missing.join(", ") : "nothing"}`,
     ...(previous ? ["", previous] : []),
+    ...(candidate.interview && candidate.interview.status === "scheduled"
+      ? ["", `ALREADY SCHEDULED: an interview on ${formatInterviewWhen(candidate.interview)}. Confirm it still works; if not, book a new slot.`]
+      : []),
     "",
     "FLOW:",
     "1) If it is not a good time, ask for a better time to call back, thank them, and end the call.",
     "2) Confirm the key resume details in one or two quick questions (current role, company, total experience). If they correct something, acknowledge it briefly.",
     "3) Ask for any missing resume information.",
-    `4) Ask these one at a time, in order, skipping anything already answered: current CTC; expected CTC; notice period and whether it is negotiable; reason for looking for a change; whether working from ${OFFICE_LOCATION} is comfortable for them; interest in ${jobRole}; availability for an interview in the coming days.`,
-    "5) If an answer is vague, ask ONE short follow-up, then move on.",
+    `4) Ask these one at a time, in order, skipping anything already answered: current CTC; expected CTC; notice period and whether it is negotiable; reason for looking for a change; whether working from ${OFFICE_LOCATION} is comfortable for them; interest in ${jobRole}.`,
+    "5) If they are interested, schedule the interview yourself (see INTERVIEW SCHEDULING).",
+    "6) If an answer is vague, ask ONE short follow-up, then move on.",
+    "",
+    `TODAY: ${spokenDate(today)}, ${officeTime(now)} India time. Use this calendar for "kal", "parso", weekday names and dates:`,
+    ...calendarLines(now, 14).map((line) => `- ${line}`),
+    "",
+    `INTERVIEW SCHEDULING: You can book the interview yourself; no recruiter approval is needed. Ask which day and time suits them for an in-person interview at ${OFFICE_LOCATION} (weekdays and Saturdays, 10 AM to 6 PM). When they name a day, say the exact date back with the weekday and time from the calendar, e.g. "So that's ${spokenDate(tomorrow)} at 3 PM, correct?" If they give only a day, ask for a time once; if they still don't fix one, book the day and say the recruiter will confirm the time. Once they confirm, say "Done, your interview is scheduled for <date and time>." Never book a date in the past or more than a few weeks ahead. If they can't commit, note it and say the recruiter will follow up.`,
     "",
     "RULES: Never repeat a question that has already been answered. Never invent details about the job, salary bands or company; if asked, say the recruiter will share them in the next round. Do not negotiate salary. Politely steer off-topic talk back.",
     "",
@@ -131,7 +143,8 @@ export function buildFirstMessage(candidate: Candidate): string {
   return `${greeting}, this is ${AGENT_NAME} from ${COMPANY_NAME}'s HR team. I'm calling about ${jobRoleFor(candidate.resumeData.appliedRole)}. Is this a good time to talk for about five minutes?`;
 }
 
-export function buildAssistantOverrides(candidate: Candidate): AssistantOverrides {
+/** `now` (default: the current time) gives the agent today's date so it can resolve "tomorrow" while talking. */
+export function buildAssistantOverrides(candidate: Candidate, now: Date = new Date()): AssistantOverrides {
   const r = candidate.resumeData;
   return {
     variableValues: {
@@ -150,7 +163,7 @@ export function buildAssistantOverrides(candidate: Candidate): AssistantOverride
     model: {
       ...VAPI_MODEL,
       temperature: 0.4,
-      messages: [{ role: "system", content: buildSystemPrompt(candidate) }],
+      messages: [{ role: "system", content: buildSystemPrompt(candidate, now) }],
     },
   };
 }

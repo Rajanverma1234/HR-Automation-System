@@ -1,5 +1,6 @@
 import { AlertTriangle, Download, Loader2, RefreshCw, UserSearch } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { formatInterviewWhen, interviewState } from "../shared/interview";
 import type { Candidate } from "../shared/types";
 import { downloadExportCsv, errorMessage, getHealth, listCandidates, type HealthResponse } from "./api";
 import CallModal from "./components/CallModal";
@@ -11,6 +12,7 @@ import Toolbar, { type StatusFilter } from "./components/Toolbar";
 import UploadDropzone from "./components/UploadDropzone";
 import VoicePicker from "./components/VoicePicker";
 import { isBrowserVoiceSupported } from "./hooks/useBrowserVoiceCall";
+import { useNow } from "./hooks/useNow";
 import { isVapiConfigured, vapiMissingEnvVars } from "./lib/vapiConfig";
 
 /** Vapi if configured, otherwise the free browser-voice demo (Chrome/Edge). */
@@ -24,6 +26,14 @@ function matchesQuery(candidate: Candidate, query: string): boolean {
     .join("\n")
     .toLowerCase();
   return haystack.includes(query);
+}
+
+function matchesFilter(candidate: Candidate, filter: StatusFilter, now: Date): boolean {
+  if (filter === "all") return true;
+  if (filter === "new" || filter === "called") return candidate.status === filter;
+  if (!candidate.interview) return false;
+  const state = interviewState(candidate.interview, now);
+  return filter === "overdue" ? state === "overdue" : state === "upcoming" || state === "today";
 }
 
 export default function App() {
@@ -48,6 +58,7 @@ function Dashboard() {
   const [callingCandidate, setCallingCandidate] = useState<Candidate | null>(null);
   const [exporting, setExporting] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<Candidate | null>(null);
+  const now = useNow();
 
   const normalizedQuery = query.trim().toLowerCase();
   const searchMatches = useMemo(
@@ -57,14 +68,25 @@ function Dashboard() {
   const counts = useMemo<Record<StatusFilter, number>>(
     () => ({
       all: searchMatches.length,
-      new: searchMatches.filter((c) => c.status === "new").length,
-      called: searchMatches.filter((c) => c.status === "called").length,
+      new: searchMatches.filter((c) => matchesFilter(c, "new", now)).length,
+      called: searchMatches.filter((c) => matchesFilter(c, "called", now)).length,
+      interview: searchMatches.filter((c) => matchesFilter(c, "interview", now)).length,
+      overdue: searchMatches.filter((c) => matchesFilter(c, "overdue", now)).length,
     }),
-    [searchMatches],
+    [searchMatches, now],
   );
-  const visible = useMemo(
-    () => (statusFilter === "all" ? searchMatches : searchMatches.filter((c) => c.status === statusFilter)),
-    [searchMatches, statusFilter],
+  const visible = useMemo(() => {
+    const list = searchMatches.filter((c) => matchesFilter(c, statusFilter, now));
+    // Interview views are sorted by interview time, soonest (or longest overdue) first.
+    if (statusFilter === "interview" || statusFilter === "overdue") {
+      list.sort((a, b) => (a.interview?.scheduledAt ?? "").localeCompare(b.interview?.scheduledAt ?? ""));
+    }
+    return list;
+  }, [searchMatches, statusFilter, now]);
+  const overdueTotal = useMemo(() => candidates.filter((c) => matchesFilter(c, "overdue", now)).length, [candidates, now]);
+  const todayTotal = useMemo(
+    () => candidates.filter((c) => c.interview && interviewState(c.interview, now) === "today").length,
+    [candidates, now],
   );
 
   const load = useCallback(async () => {
@@ -128,8 +150,17 @@ function Dashboard() {
   }
 
   function handleCallSaved(updated: Candidate) {
+    const before = candidates.find((c) => c.id === updated.id);
     setCandidates((list) => list.map((c) => (c.id === updated.id ? updated : c)));
     setPanelRefreshKey((k) => k + 1);
+    const iv = updated.interview;
+    if (iv && iv.source === "ai" && iv.id !== before?.interview?.id) {
+      toast.success(`Interview scheduled automatically: ${updated.resumeData.name ?? "candidate"}, ${formatInterviewWhen(iv)}`);
+    }
+  }
+
+  function handleCandidateUpdated(updated: Candidate) {
+    setCandidates((list) => list.map((c) => (c.id === updated.id ? updated : c)));
   }
 
   const callDisabled = !canCall || callingCandidate !== null;
@@ -191,6 +222,33 @@ function Dashboard() {
           </Banner>
         )}
 
+        {overdueTotal > 0 && (
+          <Banner tone="red">
+            {overdueTotal} {overdueTotal === 1 ? "interview is" : "interviews are"} overdue: the time has passed but{" "}
+            {overdueTotal === 1 ? "it is" : "they are"} still marked as scheduled. Open the candidate to mark it completed, no-show, or
+            reschedule.{" "}
+            <button
+              type="button"
+              onClick={() => setStatusFilter("overdue")}
+              className="font-semibold underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+            >
+              Show overdue
+            </button>
+          </Banner>
+        )}
+        {todayTotal > 0 && (
+          <Banner tone="indigo">
+            {todayTotal} {todayTotal === 1 ? "interview is" : "interviews are"} scheduled for today.{" "}
+            <button
+              type="button"
+              onClick={() => setStatusFilter("interview")}
+              className="font-semibold underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+            >
+              Show interviews
+            </button>
+          </Banner>
+        )}
+
         <section aria-labelledby="upload-heading" className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 id="upload-heading" className="mb-3 text-sm font-semibold text-slate-700">
             Add a candidate
@@ -234,6 +292,7 @@ function Dashboard() {
           ) : (
             <CandidateGrid
               candidates={visible}
+              now={now}
               loading={loading}
               onOpen={(c) => setOpenId(c.id)}
               onCall={handleCall}
@@ -252,6 +311,7 @@ function Dashboard() {
           onClose={() => setOpenId(null)}
           onCall={handleCall}
           onDeleted={(id) => handleDeleted(id, candidates.find((c) => c.id === id)?.resumeData.name ?? null)}
+          onUpdated={handleCandidateUpdated}
           callDisabled={callDisabled}
           callDisabledReason={callDisabledReason}
         />

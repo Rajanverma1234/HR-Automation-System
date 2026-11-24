@@ -2,7 +2,8 @@ import { Search, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { CandidateStatus } from "../../shared/types";
 
-export type StatusFilter = "all" | CandidateStatus;
+/** Candidate status, plus interview views: "interview" = scheduled and still due (upcoming or today), "overdue". */
+export type StatusFilter = "all" | CandidateStatus | "interview" | "overdue";
 
 type Props = {
   onQueryChange: (query: string) => void;
@@ -19,6 +20,8 @@ const SEGMENTS: { value: StatusFilter; label: string }[] = [
   { value: "all", label: "All" },
   { value: "new", label: "New" },
   { value: "called", label: "Called" },
+  { value: "interview", label: "Interview due" },
+  { value: "overdue", label: "Overdue" },
 ];
 
 export default function Toolbar({ onQueryChange, status, onStatusChange, counts, shown, total }: Props) {
@@ -73,6 +76,7 @@ export default function Toolbar({ onQueryChange, status, onStatusChange, counts,
         <div role="radiogroup" aria-label="Filter by status" className="inline-flex rounded-lg border border-slate-300 bg-white p-0.5">
           {SEGMENTS.map((seg) => {
             const active = status === seg.value;
+            const alert = seg.value === "overdue" && counts.overdue > 0;
             return (
               <button
                 key={seg.value}
@@ -86,7 +90,7 @@ export default function Toolbar({ onQueryChange, status, onStatusChange, counts,
               >
                 {seg.label}
                 <span
-                  className={`rounded-full px-1.5 text-xs ${active ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}
+                  className={`rounded-full px-1.5 text-xs ${active ? "bg-white/20 text-white" : alert ? "bg-red-600 text-white" : "bg-slate-100 text-slate-500"}`}
                 >
                   {counts[seg.value]}
                 </span>

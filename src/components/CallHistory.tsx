@@ -1,5 +1,6 @@
 import { AlertTriangle, ChevronDown, MessageSquareText } from "lucide-react";
 import { useState, type ReactNode } from "react";
+import { formatInterviewWhen, slotToIso } from "../../shared/interview";
 import type { CallAnalysis, CallRecord, Recommendation, ResumeDetailCheck } from "../../shared/types";
 import { display, formatDateTime, formatDuration } from "../lib/format";
 
@@ -109,6 +110,12 @@ function AnalysisView({ analysis: a }: { analysis: CallAnalysis }) {
     { label: "Preferred location", value: display(a.preferredLocation) },
     { label: "Interested", value: <Badge className={interestedStyle[a.interested]}>{a.interested}</Badge> },
     { label: "Interview availability", value: display(a.interviewAvailability) },
+    {
+      label: "Interview booked",
+      value: a.interviewSlot
+        ? formatInterviewWhen({ scheduledAt: slotToIso(a.interviewSlot.date, a.interviewSlot.time), timeSpecified: a.interviewSlot.time !== null })
+        : "No specific day agreed",
+    },
   ];
 
   return (

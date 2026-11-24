@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import type { CallRecord, Candidate } from "../../shared/types.js";
+import { formatInterviewWhen, interviewState } from "../../shared/interview.js";
 import { toCsv, type CsvValue } from "../csv.js";
 import { candidateRepository } from "../repository.js";
 
@@ -19,6 +20,9 @@ const HEADERS = [
   "resumeSummary",
   "status",
   "candidateCreatedAt",
+  "interviewAt",
+  "interviewStatus",
+  "interviewScheduledBy",
   "callNumber",
   "callId",
   "callStartedAt",
@@ -43,7 +47,7 @@ function joinParts(parts: (string | null)[], sep: string): string {
   return parts.filter((p): p is string => p !== null && p !== "").join(sep);
 }
 
-function candidateColumns(c: Candidate): CsvValue[] {
+function candidateColumns(c: Candidate, now: Date): CsvValue[] {
   const r = c.resumeData;
   return [
     c.id,
@@ -71,8 +75,14 @@ function candidateColumns(c: Candidate): CsvValue[] {
     r.summary,
     c.status,
     c.createdAt,
+    c.interview ? formatInterviewWhen(c.interview) : null,
+    // Includes the derived "overdue" / "today", as on the dashboard at export time.
+    c.interview ? interviewState(c.interview, now) : null,
+    c.interview?.source === "ai" ? "AI (from call)" : c.interview ? "Recruiter" : null,
   ];
 }
+
+const CANDIDATE_COLUMN_COUNT = HEADERS.indexOf("callNumber");
 
 function callColumns(call: CallRecord, callNumber: number): CsvValue[] {
   const a = call.analysis;
@@ -100,12 +110,13 @@ function callColumns(call: CallRecord, callNumber: number): CsvValue[] {
   ];
 }
 
-const EMPTY_CALL_COLUMNS: CsvValue[] = new Array(HEADERS.length - 15).fill(null);
+const EMPTY_CALL_COLUMNS: CsvValue[] = new Array(HEADERS.length - CANDIDATE_COLUMN_COUNT).fill(null);
 
 function buildExportRows(candidates: Candidate[]): CsvValue[][] {
   const rows: CsvValue[][] = [];
+  const now = new Date();
   for (const c of candidates) {
-    const base = candidateColumns(c);
+    const base = candidateColumns(c, now);
     if (c.calls.length === 0) {
       rows.push([...base, ...EMPTY_CALL_COLUMNS]);
       continue;

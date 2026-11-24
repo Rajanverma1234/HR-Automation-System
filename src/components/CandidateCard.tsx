@@ -1,10 +1,14 @@
 import { Briefcase, Mail, MapPin, Phone, Target, Trash2 } from "lucide-react";
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
+import { formatInterviewWhen, interviewState } from "../../shared/interview";
 import type { Candidate } from "../../shared/types";
 import { display, formatExperience, initials } from "../lib/format";
+import InterviewBadge, { interviewStateStyle } from "./InterviewBadge";
 
 type Props = {
   candidate: Candidate;
+  /** Current time, for the interview's Today / Overdue state. */
+  now: Date;
   onOpen: (candidate: Candidate) => void;
   onCall: (candidate: Candidate) => void;
   onDelete: (candidate: Candidate) => void;
@@ -25,6 +29,7 @@ const stop = (e: MouseEvent | KeyboardEvent) => e.stopPropagation();
 
 export default function CandidateCard({
   candidate,
+  now,
   onOpen,
   onCall,
   onDelete,
@@ -84,6 +89,16 @@ export default function CandidateCard({
           {display(r.appliedRole)}
         </span>
       </p>
+
+      {candidate.interview && (
+        <div
+          className={`-mt-1 flex min-w-0 items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm ring-1 ${interviewStateStyle[interviewState(candidate.interview, now)]}`}
+        >
+          <span className="font-medium">Interview</span>
+          <span className="min-w-0 flex-1 truncate">{formatInterviewWhen(candidate.interview)}</span>
+          <InterviewBadge state={interviewState(candidate.interview, now)} />
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-600">
         <span className="inline-flex items-center gap-1.5">
