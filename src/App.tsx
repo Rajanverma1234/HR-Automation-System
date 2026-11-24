@@ -1,10 +1,23 @@
 import { AlertTriangle, RefreshCw, UserSearch } from "lucide-react";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Candidate } from "../shared/types";
 import { errorMessage, getHealth, listCandidates, type HealthResponse } from "./api";
+import CandidateDetailPanel from "./components/CandidateDetailPanel";
 import CandidateGrid from "./components/CandidateGrid";
+import DeleteCandidateDialog from "./components/DeleteCandidateDialog";
 import { ToastProvider, useToast } from "./components/Toast";
+import Toolbar, { type StatusFilter } from "./components/Toolbar";
 import UploadDropzone from "./components/UploadDropzone";
+
+function matchesQuery(candidate: Candidate, query: string): boolean {
+  if (!query) return true;
+  const r = candidate.resumeData;
+  const haystack = [r.name, r.email, r.phone, r.location, r.currentCompany, r.currentDesignation, ...r.skills]
+    .filter((v): v is string => typeof v === "string")
+    .join("\n")
+    .toLowerCase();
+  return haystack.includes(query);
+}
 
 export default function App() {
   return (
@@ -21,6 +34,29 @@ function Dashboard() {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [panelRefreshKey] = useState(0);
+  const [pendingDelete, setPendingDelete] = useState<Candidate | null>(null);
+
+  const normalizedQuery = query.trim().toLowerCase();
+  const searchMatches = useMemo(
+    () => candidates.filter((c) => matchesQuery(c, normalizedQuery)),
+    [candidates, normalizedQuery],
+  );
+  const counts = useMemo<Record<StatusFilter, number>>(
+    () => ({
+      all: searchMatches.length,
+      new: searchMatches.filter((c) => c.status === "new").length,
+      called: searchMatches.filter((c) => c.status === "called").length,
+    }),
+    [searchMatches],
+  );
+  const visible = useMemo(
+    () => (statusFilter === "all" ? searchMatches : searchMatches.filter((c) => c.status === statusFilter)),
+    [searchMatches, statusFilter],
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -49,6 +85,17 @@ function Dashboard() {
   function handleUploaded(candidate: Candidate) {
     setCandidates((list) => [candidate, ...list.filter((c) => c.id !== candidate.id)]);
     toast.success(`Added ${candidate.resumeData.name ?? "candidate"} from ${candidate.resumeFileName}`);
+  }
+
+  function handleDeleted(id: string, name: string | null) {
+    setCandidates((list) => list.filter((c) => c.id !== id));
+    setPendingDelete(null);
+    setOpenId((current) => (current === id ? null : current));
+    toast.success(`Deleted ${name ?? "candidate"}`);
+  }
+
+  function handleCall() {
+    toast.info("Calling is added in a later step");
   }
 
   return (
@@ -95,26 +142,55 @@ function Dashboard() {
         </section>
 
         <section aria-labelledby="candidates-heading" className="flex flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <h2 id="candidates-heading" className="text-sm font-semibold text-slate-700">
-              Candidates{!loading && candidates.length > 0 ? ` (${candidates.length})` : ""}
-            </h2>
-          </div>
+          <h2 id="candidates-heading" className="text-sm font-semibold text-slate-700">
+            Candidates
+          </h2>
+          {!loading && !loadError && candidates.length > 0 && (
+            <Toolbar
+              onQueryChange={setQuery}
+              status={statusFilter}
+              onStatusChange={setStatusFilter}
+              counts={counts}
+              shown={visible.length}
+              total={candidates.length}
+            />
+          )}
           {loadError && !loading ? (
             <Banner tone="red" onRetry={() => void load()}>
               Couldn't load candidates: {loadError}
             </Banner>
+          ) : !loading && candidates.length > 0 && visible.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-slate-300 bg-white px-6 py-12 text-center text-sm text-slate-600">
+              No candidates match your search or filter.
+            </div>
           ) : (
             <CandidateGrid
-              candidates={candidates}
+              candidates={visible}
               loading={loading}
-              onOpen={() => {}}
-              onCall={() => toast.info("Calling is added in a later step")}
-              onDelete={() => {}}
+              onOpen={(c) => setOpenId(c.id)}
+              onCall={handleCall}
+              onDelete={(c) => setPendingDelete(c)}
             />
           )}
         </section>
       </main>
+
+      {openId && (
+        <CandidateDetailPanel
+          candidateId={openId}
+          refreshKey={panelRefreshKey}
+          onClose={() => setOpenId(null)}
+          onCall={handleCall}
+          onDeleted={(id) => handleDeleted(id, candidates.find((c) => c.id === id)?.resumeData.name ?? null)}
+        />
+      )}
+
+      <DeleteCandidateDialog
+        candidate={pendingDelete}
+        onCancel={() => setPendingDelete(null)}
+        onDeleted={(c) => handleDeleted(c.id, c.resumeData.name)}
+      />
+
     </div>
   );
 }
