@@ -1,9 +1,11 @@
 import "dotenv/config";
 import express, { type NextFunction, type Request, type Response } from "express";
+import multer from "multer";
 import { createServer as createViteServer } from "vite";
 import type { ApiErrorBody } from "./shared/types.js";
 import { AppError } from "./server/errors.js";
 import { candidatesRouter } from "./server/routes/candidates.js";
+import { resumeRouter } from "./server/routes/resume.js";
 
 const REQUIRED_ENV_VARS = ["GEMINI_API_KEY", "VITE_VAPI_PUBLIC_KEY", "VITE_VAPI_ASSISTANT_ID"] as const;
 
@@ -22,6 +24,7 @@ async function main(): Promise<void> {
   });
 
   app.use("/api/candidates", candidatesRouter);
+  app.use("/api/resume", resumeRouter);
 
   app.use("/api", (_req: Request, res: Response<ApiErrorBody>) => {
     res.status(404).json({ error: "Not found" });
@@ -38,6 +41,14 @@ async function main(): Promise<void> {
       const body: ApiErrorBody = { error: err.message };
       if (err.code !== undefined) body.code = err.code;
       res.status(err.status).json(body);
+      return;
+    }
+    if (err instanceof multer.MulterError) {
+      if (err.code === "LIMIT_FILE_SIZE") {
+        res.status(413).json({ error: "File is larger than 5 MB.", code: err.code });
+      } else {
+        res.status(400).json({ error: err.message, code: err.code });
+      }
       return;
     }
     // Client errors raised by Express's own body parser (e.g. malformed JSON, payload too large).
