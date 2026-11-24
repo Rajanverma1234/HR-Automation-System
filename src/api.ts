@@ -1,0 +1,76 @@
+import type { ApiErrorBody, Candidate } from "../shared/types";
+
+export type HealthResponse = { ok: boolean; geminiConfigured: boolean };
+
+export class ApiRequestError extends Error {
+  readonly status: number;
+  readonly code: string | undefined;
+
+  constructor(message: string, status: number, code?: string) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
+function isApiErrorBody(value: unknown): value is ApiErrorBody {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "error" in value &&
+    typeof value.error === "string" &&
+    (!("code" in value) || value.code === undefined || typeof value.code === "string")
+  );
+}
+
+async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(url, init);
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
+    throw new ApiRequestError("Can't reach the server. Is `npm run dev` running?", 0, "NETWORK_ERROR");
+  }
+
+  if (!res.ok) {
+    let body: unknown = null;
+    try {
+      body = await res.json();
+    } catch {
+      // Non-JSON error body: fall back to the status text below.
+    }
+    if (isApiErrorBody(body)) throw new ApiRequestError(body.error, res.status, body.code);
+    throw new ApiRequestError(res.statusText || `Request failed (HTTP ${res.status})`, res.status);
+  }
+
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
+
+export function getHealth(): Promise<HealthResponse> {
+  return request<HealthResponse>("/api/health");
+}
+
+export function listCandidates(): Promise<Candidate[]> {
+  return request<Candidate[]>("/api/candidates");
+}
+
+export function getCandidate(id: string): Promise<Candidate> {
+  return request<Candidate>(`/api/candidates/${encodeURIComponent(id)}`);
+}
+
+export function deleteCandidate(id: string): Promise<void> {
+  return request<void>(`/api/candidates/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export function uploadResume(file: File): Promise<Candidate> {
+  const form = new FormData();
+  form.append("resume", file);
+  return request<Candidate>("/api/resume", { method: "POST", body: form });
+}
+
+export function errorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  return String(err);
+}
