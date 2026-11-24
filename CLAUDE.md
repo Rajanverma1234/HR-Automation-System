@@ -7,7 +7,7 @@ An HR recruiter uploads a resume (PDF/DOCX). Gemini extracts structured candidat
 - React 19 + Vite + TypeScript + Tailwind CSS v4 (via the `@tailwindcss/vite` plugin) + lucide-react.
 - Express 5 + TypeScript, run with tsx.
 - A single `npm run dev` serves the API and the frontend on port 3000, using Vite in middleware mode.
-- `@google/genai` with model `"gemini-3.8-flash"` (switched from `gemini-2.5-flash` on 2026-11-24 because 2.5-flash is no longer available to new API keys), ALWAYS called with `responseMimeType: "application/json"` and a `responseSchema`.
+- `@google/genai` with model `"gemini-3.6-flash"` by default, overridable via the optional server env var `GEMINI_MODEL` (history, 2026-11-24: `gemini-2.5-flash` is closed to new API keys; `gemini-3.8-flash` was persistently overloaded), ALWAYS called with `responseMimeType: "application/json"` and a `responseSchema`.
 - `@vapi-ai/web` in the browser.
 - Storage is `data/candidates.json`, accessed only through `server/repository.ts`.
 - multer for uploads (PDF/DOCX only, 5 MB max); mammoth for DOCX→text.
@@ -32,6 +32,7 @@ An HR recruiter uploads a resume (PDF/DOCX). Gemini extracts structured candidat
 
 ## Env vars
 - `GEMINI_API_KEY`: server only, never sent to the browser.
+- `GEMINI_MODEL` (optional): server only; overrides the default Gemini model.
 - `VITE_VAPI_PUBLIC_KEY`, `VITE_VAPI_ASSISTANT_ID`: browser.
 
 ## Rule
