@@ -2,7 +2,7 @@ import { ApiError, GoogleGenAI, type Part, type Schema } from "@google/genai";
 import { getGeminiApiKey } from "./config.js";
 import { AppError } from "./errors.js";
 
-const MODEL = "gemini-2.5-flash";
+const MODEL = "gemini-3.8-flash";
 const TIMEOUT_MS = 60_000;
 
 let client: GoogleGenAI | null = null;
