@@ -2,12 +2,14 @@ import { AlertTriangle, RefreshCw, UserSearch } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Candidate } from "../shared/types";
 import { errorMessage, getHealth, listCandidates, type HealthResponse } from "./api";
+import CallModal from "./components/CallModal";
 import CandidateDetailPanel from "./components/CandidateDetailPanel";
 import CandidateGrid from "./components/CandidateGrid";
 import DeleteCandidateDialog from "./components/DeleteCandidateDialog";
 import { ToastProvider, useToast } from "./components/Toast";
 import Toolbar, { type StatusFilter } from "./components/Toolbar";
 import UploadDropzone from "./components/UploadDropzone";
+import { isVapiConfigured, vapiMissingEnvVars } from "./lib/vapiConfig";
 
 function matchesQuery(candidate: Candidate, query: string): boolean {
   if (!query) return true;
@@ -37,7 +39,8 @@ function Dashboard() {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [openId, setOpenId] = useState<string | null>(null);
-  const [panelRefreshKey] = useState(0);
+  const [panelRefreshKey, setPanelRefreshKey] = useState(0);
+  const [callingCandidate, setCallingCandidate] = useState<Candidate | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Candidate | null>(null);
 
   const normalizedQuery = query.trim().toLowerCase();
@@ -94,9 +97,22 @@ function Dashboard() {
     toast.success(`Deleted ${name ?? "candidate"}`);
   }
 
-  function handleCall() {
-    toast.info("Calling is added in a later step");
+  function handleCall(candidate: Candidate) {
+    if (!isVapiConfigured || callingCandidate) return;
+    setCallingCandidate(candidate);
   }
+
+  function handleCallSaved(updated: Candidate) {
+    setCandidates((list) => list.map((c) => (c.id === updated.id ? updated : c)));
+    setPanelRefreshKey((k) => k + 1);
+  }
+
+  const callDisabled = !isVapiConfigured || callingCandidate !== null;
+  const callDisabledReason = !isVapiConfigured
+    ? `Voice calling is disabled: set ${vapiMissingEnvVars.join(" and ")} in .env`
+    : callingCandidate
+      ? "A call is already in progress"
+      : undefined;
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
@@ -121,6 +137,12 @@ function Dashboard() {
         {geminiMissing && (
           <Banner tone="amber">
             Resume parsing is disabled: GEMINI_API_KEY is missing in .env. Add it and restart the server.
+          </Banner>
+        )}
+        {!isVapiConfigured && (
+          <Banner tone="amber">
+            Voice calling is disabled: {vapiMissingEnvVars.join(" and ")} {vapiMissingEnvVars.length > 1 ? "are" : "is"}{" "}
+            missing in .env. Add {vapiMissingEnvVars.length > 1 ? "them" : "it"} and restart <code>npm run dev</code>.
           </Banner>
         )}
 
@@ -170,6 +192,8 @@ function Dashboard() {
               onOpen={(c) => setOpenId(c.id)}
               onCall={handleCall}
               onDelete={(c) => setPendingDelete(c)}
+              callDisabled={callDisabled}
+              callDisabledReason={callDisabledReason}
             />
           )}
         </section>
@@ -182,6 +206,20 @@ function Dashboard() {
           onClose={() => setOpenId(null)}
           onCall={handleCall}
           onDeleted={(id) => handleDeleted(id, candidates.find((c) => c.id === id)?.resumeData.name ?? null)}
+          callDisabled={callDisabled}
+          callDisabledReason={callDisabledReason}
+        />
+      )}
+
+      {callingCandidate && (
+        <CallModal
+          candidate={callingCandidate}
+          onClose={() => setCallingCandidate(null)}
+          onSaved={handleCallSaved}
+          onViewDetails={(id) => {
+            setCallingCandidate(null);
+            setOpenId(id);
+          }}
         />
       )}
 

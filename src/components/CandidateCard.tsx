@@ -170,7 +170,6 @@ export default function CandidateCard({
           <Trash2 className="h-4 w-4" aria-hidden />
         </button>
       </div>
-      {callDisabled && callDisabledReason && <p className="-mt-2 text-xs text-slate-500">{callDisabledReason}</p>}
     </div>
   );
 }

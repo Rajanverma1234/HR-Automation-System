@@ -203,7 +203,6 @@ function PanelBody({
             Delete
           </button>
         </div>
-        {callDisabled && callDisabledReason && <p className="mt-2 text-xs text-slate-500">{callDisabledReason}</p>}
       </section>
 
       <Section title="Contact">

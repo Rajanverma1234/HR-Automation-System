@@ -1,4 +1,4 @@
-import type { ApiErrorBody, Candidate } from "../shared/types";
+import type { ApiErrorBody, CallRecord, Candidate, SaveCallRequest } from "../shared/types";
 
 export type HealthResponse = { ok: boolean; geminiConfigured: boolean };
 
@@ -68,6 +68,16 @@ export function uploadResume(file: File): Promise<Candidate> {
   const form = new FormData();
   form.append("resume", file);
   return request<Candidate>("/api/resume", { method: "POST", body: form });
+}
+
+export type SaveCallResponse = { candidate: Candidate; call: CallRecord };
+
+export function saveCall(candidateId: string, payload: SaveCallRequest): Promise<SaveCallResponse> {
+  return request<SaveCallResponse>(`/api/candidates/${encodeURIComponent(candidateId)}/calls`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
 }
 
 export function errorMessage(err: unknown): string {
