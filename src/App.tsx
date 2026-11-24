@@ -9,6 +9,7 @@ import DeleteCandidateDialog from "./components/DeleteCandidateDialog";
 import { ToastProvider, useToast } from "./components/Toast";
 import Toolbar, { type StatusFilter } from "./components/Toolbar";
 import UploadDropzone from "./components/UploadDropzone";
+import VoicePicker from "./components/VoicePicker";
 import { isBrowserVoiceSupported } from "./hooks/useBrowserVoiceCall";
 import { isVapiConfigured, vapiMissingEnvVars } from "./lib/vapiConfig";
 
@@ -178,6 +179,9 @@ function Dashboard() {
             Demo mode: Vapi keys aren't set, so calls use your browser's free built-in voice and speech recognition (needs
             internet). The agent asks a fixed set of screening questions; the call is still saved and analysed by Gemini. Add{" "}
             {vapiMissingEnvVars.join(" and ")} to .env for the full conversational AI agent.
+            <span className="mt-3 block">
+              <VoicePicker />
+            </span>
           </Banner>
         )}
         {!canCall && (
@@ -293,7 +297,7 @@ function Banner({
   return (
     <div role="alert" className={`flex items-start gap-3 rounded-xl border px-4 py-3 text-sm ${cls}`}>
       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-      <p className="flex-1">{children}</p>
+      <div className="min-w-0 flex-1">{children}</div>
       {onRetry && (
         <button
           type="button"

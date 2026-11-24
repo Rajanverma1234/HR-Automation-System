@@ -50,12 +50,32 @@ function acknowledgement(): string {
   return ACKNOWLEDGEMENTS[i] ?? "Okay.";
 }
 
-async function pickVoice(): Promise<SpeechSynthesisVoice | null> {
+const VOICE_STORAGE_KEY = "demoVoiceName";
+
+/** The voice the user picked in the VoicePicker, if any (per browser, localStorage). */
+export function getSavedVoiceName(): string | null {
+  try {
+    return window.localStorage.getItem(VOICE_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function saveVoiceName(name: string): void {
+  try {
+    window.localStorage.setItem(VOICE_STORAGE_KEY, name);
+  } catch {
+    // storage blocked: the choice just isn't remembered
+  }
+}
+
+/** English and Hindi voices installed in this browser, natural (neural) voices first. */
+export async function loadVoices(): Promise<SpeechSynthesisVoice[]> {
   const synth = window.speechSynthesis;
   let voices = synth.getVoices();
   if (voices.length === 0) {
     await new Promise<void>((resolve) => {
-      const t = setTimeout(resolve, 1000);
+      const t = setTimeout(resolve, 1500);
       synth.addEventListener("voiceschanged", () => {
         clearTimeout(t);
         resolve();
@@ -63,6 +83,25 @@ async function pickVoice(): Promise<SpeechSynthesisVoice | null> {
     });
     voices = synth.getVoices();
   }
+  const score = (v: SpeechSynthesisVoice) =>
+    (/natural/i.test(v.name) ? 0 : 10) + (v.lang === "en-IN" ? 0 : v.lang.startsWith("hi") ? 1 : 2);
+  return voices.filter((v) => /^(en|hi)/i.test(v.lang)).sort((a, b) => score(a) - score(b) || a.name.localeCompare(b.name));
+}
+
+/** Speaks a short sample with the given voice (used by the picker's Preview button). */
+export function previewVoice(voice: SpeechSynthesisVoice): void {
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance("Hi, this is Priya from Acme Talent. Is this a good time to talk for about five minutes?");
+  u.voice = voice;
+  u.lang = voice.lang;
+  window.speechSynthesis.speak(u);
+}
+
+async function pickVoice(): Promise<SpeechSynthesisVoice | null> {
+  const voices = await loadVoices();
+  const saved = getSavedVoiceName();
+  const chosen = saved ? voices.find((v) => v.name === saved) : undefined;
+  if (chosen) return chosen;
   const female = /female|neerja|swara|heera|zira|aria|jenny|samantha|google uk english female/i;
   // Edge ships free neural voices named "... Online (Natural)"; they sound far more human than the classic ones.
   const natural = /natural/i;
