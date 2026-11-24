@@ -3,7 +3,12 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { createPortal } from "react-dom";
 import type { CallRecord, Candidate, SaveCallRequest } from "../../shared/types";
 import { errorMessage, saveCall } from "../api";
+import { useBrowserVoiceCall } from "../hooks/useBrowserVoiceCall";
 import { useVapiCall, type CallStatus } from "../hooks/useVapiCall";
+import { isVapiConfigured } from "../lib/vapiConfig";
+
+/** Vapi when configured; otherwise the free browser-voice demo. Chosen once, so hook order never changes. */
+const useCall = isVapiConfigured ? useVapiCall : useBrowserVoiceCall;
 import { display, formatDuration, initials } from "../lib/format";
 import { lockBodyScroll } from "../lib/scrollLock";
 import ConfirmDialog from "./ConfirmDialog";
@@ -61,7 +66,7 @@ export default function CallModal({ candidate, onClose, onSaved, onViewDetails }
     [doSave],
   );
 
-  const call = useVapiCall({ onEnded });
+  const call = useCall({ onEnded });
   const { start, stop, status } = call;
   const active = status === "requesting-mic" || status === "connecting" || status === "live";
 
@@ -120,7 +125,10 @@ export default function CallModal({ candidate, onClose, onSaved, onViewDetails }
             <h2 id="call-modal-title" className="truncate font-semibold text-slate-900">
               {name}
             </h2>
-            <p className="truncate text-sm text-slate-500">{display(r.phone)}</p>
+            <p className="truncate text-sm text-slate-500">
+              {display(r.phone)}
+              {!isVapiConfigured && <span className="ml-2 rounded bg-indigo-50 px-1.5 py-0.5 text-xs font-medium text-indigo-700">Demo voice</span>}
+            </p>
           </div>
           <button
             type="button"

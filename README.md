@@ -195,6 +195,17 @@ Conventions: ISO date strings, ids from `crypto.randomUUID()`, and `null` (never
 - **Language**: the agent replies in the candidate's language (English, Hindi or Hinglish). The analysis is always written in English, with amounts kept as said ("18 LPA").
 - **Transcript capture**: [useVapiCall](src/hooks/useVapiCall.ts) shows partial transcripts live (faded) but stores **only `final` transcript messages**. When the call ends, by either side or by an error mid-call, the captured transcript is posted exactly once to `POST /api/candidates/:id/calls` for analysis.
 
+## Free demo mode (no Vapi keys)
+
+If `VITE_VAPI_PUBLIC_KEY` / `VITE_VAPI_ASSISTANT_ID` are not set, the **Call** button still works in Chrome/Edge, using the browser's built-in, free Web Speech API ([useBrowserVoiceCall](src/hooks/useBrowserVoiceCall.ts)):
+
+- The agent speaks with the browser's speech synthesis (an `en-IN` voice when available).
+- The candidate is heard with the browser's speech recognition (`en-IN`). This needs internet, because Chrome/Edge send the audio to their speech service.
+- The agent follows a **fixed script** built from the resume ([demoScript.ts](src/lib/demoScript.ts)): greeting → confirm role/experience → missing resume fields → CTC → expected CTC → notice period → reason for change → location → interest → interview availability → closing. If there's no answer, it re-asks once.
+- The transcript is saved and analysed by Gemini exactly like a Vapi call. Call ids start with `demo-`.
+
+Limitations: it is not conversational (no follow-ups or free-form replies), and Hindi in Devanagari isn't recognised (romanised Hinglish spoken in Indian English mostly is). Add the Vapi keys for the full AI agent.
+
 ## CSV columns
 
 There is one row per call. A candidate without calls gets one row with empty call columns. Columns, in order:

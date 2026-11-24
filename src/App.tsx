@@ -9,7 +9,11 @@ import DeleteCandidateDialog from "./components/DeleteCandidateDialog";
 import { ToastProvider, useToast } from "./components/Toast";
 import Toolbar, { type StatusFilter } from "./components/Toolbar";
 import UploadDropzone from "./components/UploadDropzone";
+import { isBrowserVoiceSupported } from "./hooks/useBrowserVoiceCall";
 import { isVapiConfigured, vapiMissingEnvVars } from "./lib/vapiConfig";
+
+/** Vapi if configured, otherwise the free browser-voice demo (Chrome/Edge). */
+const canCall = isVapiConfigured || isBrowserVoiceSupported;
 
 function matchesQuery(candidate: Candidate, query: string): boolean {
   if (!query) return true;
@@ -118,7 +122,7 @@ function Dashboard() {
   }
 
   function handleCall(candidate: Candidate) {
-    if (!isVapiConfigured || callingCandidate) return;
+    if (!canCall || callingCandidate) return;
     setCallingCandidate(candidate);
   }
 
@@ -127,9 +131,9 @@ function Dashboard() {
     setPanelRefreshKey((k) => k + 1);
   }
 
-  const callDisabled = !isVapiConfigured || callingCandidate !== null;
-  const callDisabledReason = !isVapiConfigured
-    ? `Voice calling is disabled: set ${vapiMissingEnvVars.join(" and ")} in .env`
+  const callDisabled = !canCall || callingCandidate !== null;
+  const callDisabledReason = !canCall
+    ? `Voice calling is disabled: set ${vapiMissingEnvVars.join(" and ")} in .env, or use Chrome/Edge for the free demo voice`
     : callingCandidate
       ? "A call is already in progress"
       : undefined;
@@ -169,7 +173,14 @@ function Dashboard() {
             Resume parsing is disabled: GEMINI_API_KEY is missing in .env. Add it and restart the server.
           </Banner>
         )}
-        {!isVapiConfigured && (
+        {!isVapiConfigured && isBrowserVoiceSupported && (
+          <Banner tone="indigo">
+            Demo mode: Vapi keys aren't set, so calls use your browser's free built-in voice and speech recognition (needs
+            internet). The agent asks a fixed set of screening questions; the call is still saved and analysed by Gemini. Add{" "}
+            {vapiMissingEnvVars.join(" and ")} to .env for the full conversational AI agent.
+          </Banner>
+        )}
+        {!canCall && (
           <Banner tone="amber">
             Voice calling is disabled: {vapiMissingEnvVars.join(" and ")} {vapiMissingEnvVars.length > 1 ? "are" : "is"}{" "}
             missing in .env. Add {vapiMissingEnvVars.length > 1 ? "them" : "it"} and restart <code>npm run dev</code>.
@@ -269,14 +280,16 @@ function Banner({
   children,
   onRetry,
 }: {
-  tone: "amber" | "red";
+  tone: "amber" | "red" | "indigo";
   children: ReactNode;
   onRetry?: () => void;
 }) {
   const cls =
     tone === "amber"
       ? "border-amber-200 bg-amber-50 text-amber-900"
-      : "border-red-200 bg-red-50 text-red-900";
+      : tone === "indigo"
+        ? "border-indigo-200 bg-indigo-50 text-indigo-900"
+        : "border-red-200 bg-red-50 text-red-900";
   return (
     <div role="alert" className={`flex items-start gap-3 rounded-xl border px-4 py-3 text-sm ${cls}`}>
       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />

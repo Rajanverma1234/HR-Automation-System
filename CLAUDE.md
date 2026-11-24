@@ -8,7 +8,7 @@ An HR recruiter uploads a resume (PDF/DOCX). Gemini extracts structured candidat
 - Express 5 + TypeScript, run with tsx.
 - A single `npm run dev` serves the API and the frontend on port 3000, using Vite in middleware mode.
 - `@google/genai` with model `"gemini-3.6-flash"` by default, overridable via the optional server env var `GEMINI_MODEL` (history, 2026-11-24: `gemini-2.5-flash` is closed to new API keys; `gemini-3.8-flash` was persistently overloaded), ALWAYS called with `responseMimeType: "application/json"` and a `responseSchema`.
-- `@vapi-ai/web` in the browser.
+- `@vapi-ai/web` in the browser. When the Vapi env vars are missing, CallModal falls back to a free scripted demo using the browser Web Speech API (src/hooks/useBrowserVoiceCall.ts), with the same hook interface as useVapiCall.
 - Storage is `data/candidates.json`, accessed only through `server/repository.ts`.
 - multer for uploads (PDF/DOCX only, 5 MB max); mammoth for DOCX→text.
 
