@@ -9,6 +9,7 @@
     "seed": "tsx scripts/seed.ts",
     "sample": "tsx scripts/make-sample-resume.ts",
     "e2e": "tsx scripts/e2e.ts",
+    "test:call": "tsx scripts/browser-call-test.ts",
     "demo": "tsx scripts/demo-candidates.ts"
   },
   "dependencies": {

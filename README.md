@@ -71,7 +71,8 @@ An HR recruiter uploads a resume (PDF or DOCX). Gemini extracts structured candi
 | `npm run typecheck` | `tsc --noEmit` over server, shared, src and scripts |
 | `npm run seed` | Adds a fictional candidate. Add `-- --with-call` to include an analysed call with an 8-line transcript |
 | `npm run sample` | Regenerates `samples/sample-resume.docx` (fictional "Rahul Sharma") |
-| `npm run e2e` | End-to-end test script (added in the next step) |
+| `npm run e2e` | API end-to-end test against the running dev server (upload → call → analysis → interview → CSV) |
+| `npm run test:call` | Browser test of the call transcript: starts its own server on port 3011 in demo-voice mode, drives headless Microsoft Edge with a fake mic and fake speech, places a full screening call through the real UI, then checks the live transcript, the saved transcript, the analysis, the auto-booked interview and the detail panel. It also checks that ending a call mid-answer keeps the candidate's last words. Uses Gemini, not Vapi credits. Set `EDGE_PATH` if Edge isn't in the default location |
 
 ## Project structure
 

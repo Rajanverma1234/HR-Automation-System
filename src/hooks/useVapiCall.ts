@@ -83,7 +83,13 @@ export function useVapiCall({ onEnded }: Options) {
   const [status, setStatus] = useState<CallStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<TranscriptLine[]>([]);
-  const [partial, setPartial] = useState<PartialLine | null>(null);
+  const [partial, setPartialState] = useState<PartialLine | null>(null);
+  /** Mirror of `partial`, so finalize() keeps a candidate's last words if the call ends before Vapi sends them as final. */
+  const partialRef = useRef<PartialLine | null>(null);
+  const setPartial = useCallback((p: PartialLine | null) => {
+    partialRef.current = p;
+    setPartialState(p);
+  }, []);
   const [elapsedSec, setElapsedSec] = useState(0);
   const [isAgentSpeaking, setIsAgentSpeaking] = useState(false);
   const [callId, setCallId] = useState<string | null>(null);
@@ -123,6 +129,11 @@ export function useVapiCall({ onEnded }: Options) {
     activeRef.current = false;
     stopTimer();
     setIsAgentSpeaking(false);
+    const unfinished = partialRef.current;
+    if (unfinished?.role === "user" && unfinished.text.trim()) {
+      transcriptRef.current = [...transcriptRef.current, { role: "user", text: unfinished.text.trim(), at: new Date().toISOString() }];
+      setTranscript(transcriptRef.current);
+    }
     setPartial(null);
     const endedAt = new Date().toISOString();
     const started = startedAtRef.current ?? endedAt;
@@ -134,7 +145,7 @@ export function useVapiCall({ onEnded }: Options) {
       durationSec,
       transcript: [...transcriptRef.current],
     });
-  }, [stopTimer]);
+  }, [stopTimer, setPartial]);
 
   const fail = useCallback(
     (message: string) => {

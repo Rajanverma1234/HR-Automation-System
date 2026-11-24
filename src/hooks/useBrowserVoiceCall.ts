@@ -123,7 +123,13 @@ export function useBrowserVoiceCall({ onEnded }: Options) {
   const [status, setStatus] = useState<CallStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<TranscriptLine[]>([]);
-  const [partial, setPartial] = useState<{ role: TranscriptLine["role"]; text: string } | null>(null);
+  const [partial, setPartialState] = useState<{ role: TranscriptLine["role"]; text: string } | null>(null);
+  /** Mirror of `partial`, so finalize() can keep words the candidate was still saying when the call was ended. */
+  const partialRef = useRef<{ role: TranscriptLine["role"]; text: string } | null>(null);
+  const setPartial = useCallback((p: { role: TranscriptLine["role"]; text: string } | null) => {
+    partialRef.current = p;
+    setPartialState(p);
+  }, []);
   const [elapsedSec, setElapsedSec] = useState(0);
   const [isAgentSpeaking, setIsAgentSpeaking] = useState(false);
   const [callId, setCallId] = useState<string | null>(null);
@@ -169,11 +175,14 @@ export function useBrowserVoiceCall({ onEnded }: Options) {
     timerRef.current = null;
     setIsAgentSpeaking(false);
     setPartial(null);
-  }, []);
+  }, [setPartial]);
 
   const finalize = useCallback(() => {
     if (finalizedRef.current) return;
     finalizedRef.current = true;
+    // The call was ended mid-answer: keep what was heard so far.
+    const unfinished = partialRef.current?.text.trim();
+    if (unfinished) push("user", unfinished);
     teardownAudio();
     const endedAt = new Date().toISOString();
     const started = startedAtRef.current ?? endedAt;
@@ -184,7 +193,7 @@ export function useBrowserVoiceCall({ onEnded }: Options) {
       durationSec: Math.max(0, Math.round((Date.parse(endedAt) - Date.parse(started)) / 1000)),
       transcript: [...transcriptRef.current],
     });
-  }, [teardownAudio]);
+  }, [push, teardownAudio]);
 
   const speak = useCallback(
     (text: string) =>
@@ -279,7 +288,7 @@ export function useBrowserVoiceCall({ onEnded }: Options) {
         rec.onend = () => finish(); // browser ended the session (e.g. long silence)
         rec.start();
       }),
-    [],
+    [setPartial],
   );
 
   /** Asks a question (optionally after a short lead-in like "Got it."), re-asking once if there is no answer. */
@@ -384,7 +393,7 @@ export function useBrowserVoiceCall({ onEnded }: Options) {
         finalize(); // keep whatever was said
       }
     },
-    [ask, finalize, speak, teardownAudio, updateStatus],
+    [ask, finalize, setPartial, speak, teardownAudio, updateStatus],
   );
 
   const stop = useCallback(async () => {
