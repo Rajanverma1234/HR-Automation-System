@@ -1,6 +1,9 @@
 import "dotenv/config";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { createServer as createViteServer } from "vite";
+import type { ApiErrorBody } from "./shared/types.js";
+import { AppError } from "./server/errors.js";
+import { candidatesRouter } from "./server/routes/candidates.js";
 
 const REQUIRED_ENV_VARS = ["GEMINI_API_KEY", "VITE_VAPI_PUBLIC_KEY", "VITE_VAPI_ASSISTANT_ID"] as const;
 
@@ -18,22 +21,40 @@ async function main(): Promise<void> {
     res.json({ ok: true, geminiConfigured: Boolean(process.env.GEMINI_API_KEY) });
   });
 
-  app.use("/api", (_req: Request, res: Response) => {
+  app.use("/api/candidates", candidatesRouter);
+
+  app.use("/api", (_req: Request, res: Response<ApiErrorBody>) => {
     res.status(404).json({ error: "Not found" });
   });
 
-  app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
-    console.error(err instanceof Error ? err.stack : err);
+  app.use((err: unknown, _req: Request, res: Response<ApiErrorBody>, next: NextFunction) => {
     if (res.headersSent) {
+      console.error(err instanceof Error ? err.stack : err);
       next(err);
       return;
     }
-    const status =
-      typeof err === "object" && err !== null && "status" in err && typeof err.status === "number"
-        ? err.status
-        : 500;
-    const message = status < 500 && err instanceof Error ? err.message : "Internal server error";
-    res.status(status).json({ error: message });
+    if (err instanceof AppError) {
+      if (err.status >= 500) console.error(err.stack);
+      const body: ApiErrorBody = { error: err.message };
+      if (err.code !== undefined) body.code = err.code;
+      res.status(err.status).json(body);
+      return;
+    }
+    // Client errors raised by Express's own body parser (e.g. malformed JSON, payload too large).
+    if (
+      err instanceof Error &&
+      "expose" in err &&
+      err.expose === true &&
+      "status" in err &&
+      typeof err.status === "number" &&
+      err.status >= 400 &&
+      err.status < 500
+    ) {
+      res.status(err.status).json({ error: err.message });
+      return;
+    }
+    console.error(err instanceof Error ? err.stack : err);
+    res.status(500).json({ error: "Internal server error" });
   });
 
   const vite = await createViteServer({ server: { middlewareMode: true }, appType: "spa" });
