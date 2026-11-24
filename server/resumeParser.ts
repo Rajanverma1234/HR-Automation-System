@@ -3,6 +3,7 @@ import mammoth from "mammoth";
 import type { Education, PreviousCompany, ResumeData } from "../shared/types.js";
 import { AppError } from "./errors.js";
 import { generateJson } from "./gemini.js";
+import { asArray, cleanString, isRecord } from "./normalize.js";
 
 const nullableString: Schema = { type: Type.STRING, nullable: true };
 
@@ -134,28 +135,11 @@ export async function parseResume(file: UploadedResume): Promise<ResumeData> {
 
 // ---------- normalisation ----------
 
-const EMPTY_MARKERS = new Set(["", "n/a", "na", "null", "none", "not mentioned"]);
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function cleanString(value: unknown): string | null {
-  if (typeof value === "number" && Number.isFinite(value)) return String(value);
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return EMPTY_MARKERS.has(trimmed.toLowerCase()) ? null : trimmed;
-}
-
 function cleanNumber(value: unknown): number | null {
   const n = typeof value === "string" ? Number(value.trim()) : value;
   if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return null;
   if (typeof value === "string" && value.trim() === "") return null;
   return n;
-}
-
-function asArray(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
 }
 
 export function normalizeResumeData(raw: unknown): ResumeData {

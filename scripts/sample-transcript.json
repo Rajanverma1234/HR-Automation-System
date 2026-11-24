@@ -1,0 +1,22 @@
+[
+  { "role": "assistant", "at": "2026-11-24T06:00:02.000Z", "text": "Hello, am I speaking with Rahul Sharma? This is the screening assistant calling about the Senior Full-Stack Engineer opening. Is this a good time for a quick five-minute chat?" },
+  { "role": "user", "at": "2026-11-24T06:00:10.000Z", "text": "Haan, yes, this is Rahul. Go ahead, abhi time hai." },
+  { "role": "assistant", "at": "2026-11-24T06:00:16.000Z", "text": "Great, thank you. Your resume says you're currently a Senior Software Engineer at Nimbus Tech Pvt Ltd since January 2021. Is that correct?" },
+  { "role": "user", "at": "2026-11-24T06:00:24.000Z", "text": "Yes, that's right. Senior Software Engineer at Nimbus Tech, January 2021 se." },
+  { "role": "assistant", "at": "2026-11-24T06:00:30.000Z", "text": "And based on your resume, you have a little over ten years of total experience. Does that sound right?" },
+  { "role": "user", "at": "2026-11-24T06:00:39.000Z", "text": "Actually around 8.5 years full-time. Lumen Digital wala first role was a trainee programme, so I don't count that fully." },
+  { "role": "assistant", "at": "2026-11-24T06:00:47.000Z", "text": "Understood, thanks for clarifying. Could you share your current CTC?" },
+  { "role": "user", "at": "2026-11-24T06:00:52.000Z", "text": "Current CTC is 18 LPA, fixed plus variable included." },
+  { "role": "assistant", "at": "2026-11-24T06:00:57.000Z", "text": "And what is your expected CTC for this role?" },
+  { "role": "user", "at": "2026-11-24T06:01:03.000Z", "text": "I'm looking at around 24 to 25 LPA." },
+  { "role": "assistant", "at": "2026-11-24T06:01:08.000Z", "text": "Noted. What is your notice period?" },
+  { "role": "user", "at": "2026-11-24T06:01:14.000Z", "text": "Officially 60 days hai, but negotiable to 30 days, I've checked with my manager." },
+  { "role": "assistant", "at": "2026-11-24T06:01:21.000Z", "text": "That's helpful. May I ask why you're looking for a change?" },
+  { "role": "user", "at": "2026-11-24T06:01:30.000Z", "text": "Mainly growth. Nimbus mein I've done a lot on the platform side, but I want bigger product ownership, end-to-end features own karna chahta hoon." },
+  { "role": "assistant", "at": "2026-11-24T06:01:38.000Z", "text": "Makes sense. Which work location would you prefer?" },
+  { "role": "user", "at": "2026-11-24T06:01:44.000Z", "text": "Bengaluru is best since I'm already here, or remote. Both are fine for me." },
+  { "role": "assistant", "at": "2026-11-24T06:01:50.000Z", "text": "Thank you. Are you interested in moving forward with this role, and when would you be available for a technical interview?" },
+  { "role": "user", "at": "2026-11-24T06:01:58.000Z", "text": "Yes, definitely interested. Thursday afternoon works, after 2 pm." },
+  { "role": "assistant", "at": "2026-11-24T06:02:05.000Z", "text": "Perfect, I'll pass this on to the recruiter and they'll confirm the Thursday slot. Thank you for your time, Rahul. Have a great day!" },
+  { "role": "user", "at": "2026-11-24T06:02:10.000Z", "text": "Thank you, aapka bhi din accha ho. Bye!" }
+]
