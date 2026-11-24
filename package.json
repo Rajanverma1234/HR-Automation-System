@@ -8,7 +8,8 @@
     "typecheck": "tsc --noEmit",
     "seed": "tsx scripts/seed.ts",
     "sample": "tsx scripts/make-sample-resume.ts",
-    "e2e": "tsx scripts/e2e.ts"
+    "e2e": "tsx scripts/e2e.ts",
+    "demo": "tsx scripts/demo-candidates.ts"
   },
   "dependencies": {
     "@google/genai": "^3.6.1",
