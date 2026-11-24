@@ -6,6 +6,7 @@ import { candidateRepository } from "../repository.js";
 const HEADERS = [
   "candidateId",
   "name",
+  "appliedRole",
   "email",
   "phone",
   "location",
@@ -47,6 +48,7 @@ function candidateColumns(c: Candidate): CsvValue[] {
   return [
     c.id,
     r.name,
+    r.appliedRole,
     r.email,
     r.phone,
     r.location,
@@ -98,7 +100,7 @@ function callColumns(call: CallRecord, callNumber: number): CsvValue[] {
   ];
 }
 
-const EMPTY_CALL_COLUMNS: CsvValue[] = new Array(HEADERS.length - 14).fill(null);
+const EMPTY_CALL_COLUMNS: CsvValue[] = new Array(HEADERS.length - 15).fill(null);
 
 function buildExportRows(candidates: Candidate[]): CsvValue[][] {
   const rows: CsvValue[][] = [];

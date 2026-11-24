@@ -67,6 +67,8 @@ export class JsonFileCandidateRepository implements CandidateRepository {
       throw corrupted();
     }
     if (!isStoreFile(parsed)) throw corrupted();
+    // Records saved before `appliedRole` existed: treat the missing field as null.
+    for (const c of parsed.candidates) c.resumeData.appliedRole ??= null;
     return parsed;
   }
 

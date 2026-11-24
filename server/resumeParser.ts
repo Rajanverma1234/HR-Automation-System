@@ -11,6 +11,7 @@ export const resumeSchema: Schema = {
   type: Type.OBJECT,
   properties: {
     name: nullableString,
+    appliedRole: nullableString,
     email: nullableString,
     phone: nullableString,
     location: nullableString,
@@ -46,6 +47,7 @@ export const resumeSchema: Schema = {
   },
   required: [
     "name",
+    "appliedRole",
     "email",
     "phone",
     "location",
@@ -59,6 +61,7 @@ export const resumeSchema: Schema = {
   ],
   propertyOrdering: [
     "name",
+    "appliedRole",
     "email",
     "phone",
     "location",
@@ -76,6 +79,7 @@ const systemInstruction = `You extract candidate details from a resume. Use ONLY
 
 Field rules:
 - name, email, phone, location: copy exactly as written in the resume. location is the candidate's own city/region, not an employer's address. If absent, null.
+- appliedRole: the job title the candidate says they are applying for, ONLY when explicitly written (e.g. "Position applied for: SEO Executive", "Applying for: Sales Manager", or an objective naming a specific position). Copy the job title exactly as written, INCLUDING any team, desk or location qualifier, e.g. "Senior Sales Executive (Dubai Team)" stays "Senior Sales Executive (Dubai Team)". Only remove a hiring company's name, e.g. "SEO Executive - Acme Ltd" becomes "SEO Executive". Never use the current designation as a substitute; if no applied position is written, null.
 - totalExperienceYears: use the total experience figure stated in the resume. If none is stated, compute it from the employment date ranges ONLY when every range has a clear start and end. Treat "Present" (or "Current", "Till date", "Now") as today's date, which is given in the prompt. Round to 1 decimal place. Otherwise return null.
 - currentCompany / currentDesignation: the role marked present/current; if no role is marked that way, the clearly most recent role. If neither can be determined, null.
 - previousCompanies: every employer EXCEPT the current role, most recent first. "company" is the employer name; "designation" is the job title; "duration" is the date range or length exactly as written. Use null for any part not written.
@@ -177,6 +181,7 @@ export function normalizeResumeData(raw: unknown): ResumeData {
 
   return {
     name: cleanString(r.name),
+    appliedRole: cleanString(r.appliedRole),
     email: cleanString(r.email),
     phone: cleanString(r.phone),
     location: cleanString(r.location),

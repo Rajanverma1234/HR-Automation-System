@@ -141,6 +141,7 @@ async function main(): Promise<void> {
   check(r.skills.includes("React"), `skills include React (${r.skills.join(", ")})`);
   check(r.currentCompany?.includes("Nimbus"), `currentCompany contains "Nimbus" (${r.currentCompany})`);
   check(candidate.status === "new" && candidate.calls.length === 0, 'status "new" and no calls');
+  check(r.appliedRole === null, `appliedRole is null (resume names no position) (${r.appliedRole})`);
   const uploadJson = JSON.stringify(candidate);
   check(!uploadJson.includes("LPA") && !/notice/i.test(uploadJson), 'No invented data ("LPA"/"notice" absent)', uploadJson);
 

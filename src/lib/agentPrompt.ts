@@ -1,6 +1,6 @@
 import type Vapi from "@vapi-ai/web";
 import type { CallAnalysis, Candidate, ResumeData } from "../../shared/types";
-import { AGENT_NAME, COMPANY_NAME, JOB_ROLE, VAPI_MODEL } from "./vapiConfig";
+import { AGENT_NAME, COMPANY_FACTS, COMPANY_NAME, OFFICE_LOCATION, VAPI_MODEL, jobRoleFor } from "./vapiConfig";
 
 /** The overrides type accepted by vapi.start(assistantId, overrides). */
 type AssistantOverrides = NonNullable<Parameters<Vapi["start"]>[1]>;
@@ -36,6 +36,7 @@ export function missingResumeFields(r: ResumeData): string[] {
 function resumeFactLines(r: ResumeData): string[] {
   const facts: [string, string | null][] = [
     ["Name", r.name],
+    ["Applied for", r.appliedRole],
     ["Current designation", r.currentDesignation],
     ["Current company", r.currentCompany],
     ["Total experience", experienceText(r.totalExperienceYears)],
@@ -83,9 +84,12 @@ function buildSystemPrompt(candidate: Candidate): string {
   const missing = missingResumeFields(r);
   const facts = resumeFactLines(r);
   const previous = previousCallBlock(candidate);
+  const jobRole = jobRoleFor(r.appliedRole);
 
   return [
-    `You are ${AGENT_NAME}, a polite, professional HR screening assistant at ${COMPANY_NAME}, on a short voice call with ${name} about ${JOB_ROLE}.`,
+    `You are ${AGENT_NAME}, a polite, professional HR screening assistant at ${COMPANY_NAME}, on a short voice call with ${name} about ${jobRole}.`,
+    "",
+    `ABOUT THE COMPANY (you may share only these facts): ${COMPANY_FACTS}`,
     "",
     "LANGUAGE: Reply in the language the candidate uses: English, Hindi or Hinglish. If they switch, switch with them.",
     "",
@@ -101,7 +105,7 @@ function buildSystemPrompt(candidate: Candidate): string {
     "1) If it is not a good time, ask for a better time to call back, thank them, and end the call.",
     "2) Confirm the key resume details in one or two quick questions (current role, company, total experience). If they correct something, acknowledge it briefly.",
     "3) Ask for any missing resume information.",
-    `4) Ask these one at a time, in order, skipping anything already answered: current CTC; expected CTC; notice period and whether it is negotiable; reason for looking for a change; preferred work location; interest in ${JOB_ROLE}; availability for an interview in the coming days.`,
+    `4) Ask these one at a time, in order, skipping anything already answered: current CTC; expected CTC; notice period and whether it is negotiable; reason for looking for a change; whether working from ${OFFICE_LOCATION} is comfortable for them; interest in ${jobRole}; availability for an interview in the coming days.`,
     "5) If an answer is vague, ask ONE short follow-up, then move on.",
     "",
     "RULES: Never repeat a question that has already been answered. Never invent details about the job, salary bands or company; if asked, say the recruiter will share them in the next round. Do not negotiate salary. Politely steer off-topic talk back.",
@@ -113,7 +117,7 @@ function buildSystemPrompt(candidate: Candidate): string {
 export function buildFirstMessage(candidate: Candidate): string {
   const first = firstNameOf(candidate.resumeData.name);
   const greeting = first ? `Hi ${first}` : "Hi there";
-  return `${greeting}, this is ${AGENT_NAME} from ${COMPANY_NAME}'s HR team. I'm calling about ${JOB_ROLE}. Is this a good time to talk for about five minutes?`;
+  return `${greeting}, this is ${AGENT_NAME} from ${COMPANY_NAME}'s HR team. I'm calling about ${jobRoleFor(candidate.resumeData.appliedRole)}. Is this a good time to talk for about five minutes?`;
 }
 
 export function buildAssistantOverrides(candidate: Candidate): AssistantOverrides {
@@ -129,7 +133,7 @@ export function buildAssistantOverrides(candidate: Candidate): AssistantOverride
       skills: r.skills.length > 0 ? r.skills.join(", ") : NOT_MENTIONED,
       agentName: AGENT_NAME,
       companyName: COMPANY_NAME,
-      jobRole: JOB_ROLE,
+      jobRole: jobRoleFor(r.appliedRole),
     },
     firstMessage: buildFirstMessage(candidate),
     model: {

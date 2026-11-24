@@ -12,6 +12,8 @@ export type PreviousCompany = {
 
 export type ResumeData = {
   name: string | null;
+  /** The position the resume says the candidate is applying for, e.g. "SEO Executive". null when not stated. */
+  appliedRole: string | null;
   email: string | null;
   phone: string | null;
   location: string | null;

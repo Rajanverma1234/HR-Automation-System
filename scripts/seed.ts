@@ -5,6 +5,7 @@ import type { CallRecord, ResumeData, TranscriptLine } from "../shared/types.js"
 // Clearly fictional data. Some fields are intentionally null to exercise null handling.
 const resumeData: ResumeData = {
   name: "Priya Testcandidate",
+  appliedRole: null,
   email: "priya.testcandidate@example.com",
   phone: "+91 90000 00000",
   location: null,

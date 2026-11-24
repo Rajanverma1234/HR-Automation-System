@@ -19,7 +19,7 @@ const canCall = isVapiConfigured || isBrowserVoiceSupported;
 function matchesQuery(candidate: Candidate, query: string): boolean {
   if (!query) return true;
   const r = candidate.resumeData;
-  const haystack = [r.name, r.email, r.phone, r.location, r.currentCompany, r.currentDesignation, ...r.skills]
+  const haystack = [r.name, r.appliedRole, r.email, r.phone, r.location, r.currentCompany, r.currentDesignation, ...r.skills]
     .filter((v): v is string => typeof v === "string")
     .join("\n")
     .toLowerCase();

@@ -173,6 +173,10 @@ function PanelBody({
               {r.name ?? "Unnamed candidate"}
             </h2>
             <p className="text-sm text-slate-600">{display(role)}</p>
+            <p className="mt-1 text-sm">
+              <span className="text-slate-500">Applied for: </span>
+              <span className={r.appliedRole ? "font-medium text-indigo-700" : "text-slate-400"}>{display(r.appliedRole)}</span>
+            </p>
             <p className="mt-0.5 text-xs text-slate-400">From {candidate.resumeFileName}</p>
           </div>
           {candidate.status === "called" ? (

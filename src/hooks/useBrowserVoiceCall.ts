@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Candidate, SaveCallRequest, TranscriptLine } from "../../shared/types";
 import { buildDemoScript, isNotAGoodTime } from "../lib/demoScript";
+import { AGENT_NAME, COMPANY_NAME } from "../lib/vapiConfig";
 import type { CallStatus } from "./useVapiCall";
 
 // ---- Minimal Web Speech API typings (not in TypeScript's DOM lib) ----
@@ -91,7 +92,7 @@ export async function loadVoices(): Promise<SpeechSynthesisVoice[]> {
 /** Speaks a short sample with the given voice (used by the picker's Preview button). */
 export function previewVoice(voice: SpeechSynthesisVoice): void {
   window.speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance("Hi, this is Priya from Acme Talent. Is this a good time to talk for about five minutes?");
+  const u = new SpeechSynthesisUtterance(`Hi, this is ${AGENT_NAME} from ${COMPANY_NAME}. Is this a good time to talk for about five minutes?`);
   u.voice = voice;
   u.lang = voice.lang;
   window.speechSynthesis.speak(u);

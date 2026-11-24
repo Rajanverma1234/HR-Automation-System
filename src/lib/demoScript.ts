@@ -1,6 +1,6 @@
 import type { Candidate } from "../../shared/types";
 import { buildFirstMessage, experienceText, firstNameOf, missingResumeFields } from "./agentPrompt";
-import { JOB_ROLE } from "./vapiConfig";
+import { OFFICE_LOCATION, jobRoleFor } from "./vapiConfig";
 
 /**
  * Scripted screening flow for the free browser-voice demo (used when Vapi is not configured).
@@ -42,8 +42,8 @@ export function buildDemoScript(candidate: Candidate): DemoScript {
       "And what are you expecting for this role?",
       "What's your notice period? Is there any flexibility on that?",
       "May I ask what's making you look for a change right now?",
-      "Which location would you prefer to work from?",
-      `And are you interested in ${JOB_ROLE}?`,
+      `This role is based at ${OFFICE_LOCATION}. Would working from there be comfortable for you?`,
+      `And are you interested in ${jobRoleFor(candidate.resumeData.appliedRole)}?`,
       "Lovely. When would be a good time for an interview in the next few days?",
     ],
     closing: `Thank you${first ? `, ${first}` : ""}. That's everything I needed. The recruiter will get back to you soon. Have a great day, goodbye!`,

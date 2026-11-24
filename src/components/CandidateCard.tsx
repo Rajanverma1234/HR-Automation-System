@@ -1,4 +1,4 @@
-import { Briefcase, Mail, MapPin, Phone, Trash2 } from "lucide-react";
+import { Briefcase, Mail, MapPin, Phone, Target, Trash2 } from "lucide-react";
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 import type { Candidate } from "../../shared/types";
 import { display, formatExperience, initials } from "../lib/format";
@@ -76,6 +76,14 @@ export default function CandidateCard({
           </span>
         )}
       </div>
+
+      <p className="-mt-1 flex min-w-0 items-center gap-1.5 text-sm">
+        <Target className="h-4 w-4 shrink-0 text-indigo-500" aria-hidden />
+        <span className="text-slate-500">Applied for:</span>
+        <span className={`truncate font-medium ${r.appliedRole ? "text-indigo-700" : "text-slate-400"}`}>
+          {display(r.appliedRole)}
+        </span>
+      </p>
 
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-600">
         <span className="inline-flex items-center gap-1.5">
