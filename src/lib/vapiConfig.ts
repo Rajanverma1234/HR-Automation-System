@@ -13,7 +13,7 @@ export const vapiMissingEnvVars: string[] = [
 
 export const isVapiConfigured: boolean = vapiMissingEnvVars.length === 0;
 
-// Company/agent facts live in shared/ so the server's phone call uses the same script.
+// Company/agent facts live in shared/company.ts.
 export {
   AGENT_NAME,
   COMPANY_FACTS,

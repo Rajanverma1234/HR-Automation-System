@@ -1,8 +1,6 @@
 import { Router, type Request, type Response } from "express";
-import type { CallRecord, Candidate, PhoneCallJob } from "../../shared/types.js";
+import type { CallRecord, Candidate } from "../../shared/types.js";
 import { candidateNotFound as notFound, recordCall } from "../callRecorder.js";
-import { AppError } from "../errors.js";
-import { getPhoneCallJob, startPhoneCall } from "../phoneCalls.js";
 import { candidateRepository } from "../repository.js";
 import { validateSaveCallRequest } from "../validation.js";
 
@@ -26,26 +24,6 @@ candidatesRouter.post(
     const body = validateSaveCallRequest(req.body);
     const { candidate, call } = await recordCall(req.params.id, body);
     res.status(201).json({ candidate, call });
-  },
-);
-
-/** Places a real phone call through Vapi. The server tracks it; poll GET /:id/phone-call for progress. */
-candidatesRouter.post(
-  "/:id/phone-call",
-  async (req: Request<{ id: string }>, res: Response<PhoneCallJob>) => {
-    const candidate = await candidateRepository.get(req.params.id);
-    if (!candidate) throw notFound();
-    res.status(202).json(await startPhoneCall(candidate));
-  },
-);
-
-/** The latest phone call job for this candidate (dialing, in-progress, analysing, done or error). */
-candidatesRouter.get(
-  "/:id/phone-call",
-  async (req: Request<{ id: string }>, res: Response<PhoneCallJob>) => {
-    const job = getPhoneCallJob(req.params.id);
-    if (!job) throw new AppError(404, "No phone call has been placed to this candidate since the server started.", "NO_PHONE_CALL");
-    res.json(job);
   },
 );
 

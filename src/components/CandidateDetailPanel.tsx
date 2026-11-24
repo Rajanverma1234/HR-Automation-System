@@ -1,12 +1,11 @@
 import { AlertTriangle, Briefcase, Building2, GraduationCap, Loader2, Mail, MapPin, Phone, RefreshCw, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import type { Candidate, PhoneCallConfig } from "../../shared/types";
+import type { Candidate } from "../../shared/types";
 import { errorMessage, getCandidate } from "../api";
 import { display, formatExperience, initials } from "../lib/format";
 import { lockBodyScroll } from "../lib/scrollLock";
 import CallHistory from "./CallHistory";
 import DeleteCandidateDialog from "./DeleteCandidateDialog";
-import PhoneCallControl from "./PhoneCallControl";
 
 type Props = {
   candidateId: string;
@@ -17,10 +16,6 @@ type Props = {
   refreshKey: number;
   callDisabled?: boolean;
   callDisabledReason?: string;
-  /** Server phone-call configuration from /api/health; null while unknown. */
-  phoneCallConfig: PhoneCallConfig | null;
-  /** A server-placed phone call to this candidate has been saved. */
-  onPhoneCallSaved: (candidateId: string) => void;
 };
 
 type LoadState =
@@ -36,8 +31,6 @@ export default function CandidateDetailPanel({
   refreshKey,
   callDisabled = false,
   callDisabledReason,
-  phoneCallConfig,
-  onPhoneCallSaved,
 }: Props) {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [reloadTick, setReloadTick] = useState(0);
@@ -130,8 +123,6 @@ export default function CandidateDetailPanel({
               onDelete={() => setConfirmDelete(state.candidate)}
               callDisabled={callDisabled}
               callDisabledReason={callDisabledReason}
-              phoneCallConfig={phoneCallConfig}
-              onPhoneCallSaved={onPhoneCallSaved}
             />
           )}
         </div>
@@ -155,16 +146,12 @@ function PanelBody({
   onDelete,
   callDisabled,
   callDisabledReason,
-  phoneCallConfig,
-  onPhoneCallSaved,
 }: {
   candidate: Candidate;
   onCall: (candidate: Candidate) => void;
   onDelete: () => void;
   callDisabled: boolean;
   callDisabledReason: string | undefined;
-  phoneCallConfig: PhoneCallConfig | null;
-  onPhoneCallSaved: (candidateId: string) => void;
 }) {
   const r = candidate.resumeData;
   const role =
@@ -220,7 +207,6 @@ function PanelBody({
             Delete
           </button>
         </div>
-        <PhoneCallControl candidate={candidate} config={phoneCallConfig} onSaved={onPhoneCallSaved} />
       </section>
 
       <Section title="Contact">

@@ -94,30 +94,3 @@ export type ApiErrorBody = {
   error: string;
   code?: string;
 };
-
-/** Lifecycle of a server-placed phone screening call. */
-export type PhoneCallStatus = "dialing" | "in-progress" | "analysing" | "done" | "error";
-
-/** A phone call the server placed through Vapi and is tracking until it is saved. Kept in server memory only. */
-export type PhoneCallJob = {
-  id: string;
-  candidateId: string;
-  /** Vapi's call id, once Vapi has accepted the call. */
-  vapiCallId: string | null;
-  /** The E.164 number that was dialled. */
-  phoneNumber: string;
-  status: PhoneCallStatus;
-  /** Vapi's ended reason, e.g. "customer-ended-call" or "customer-did-not-answer". */
-  endedReason: string | null;
-  error: string | null;
-  /** The saved call, once status is "done". */
-  call: CallRecord | null;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type PhoneCallConfig = {
-  configured: boolean;
-  /** Server env vars that must be set before phone calls can be placed. */
-  missingEnvVars: string[];
-};

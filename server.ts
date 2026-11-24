@@ -7,7 +7,6 @@ import { AppError } from "./server/errors.js";
 import { candidatesRouter } from "./server/routes/candidates.js";
 import { exportRouter } from "./server/routes/export.js";
 import { resumeRouter } from "./server/routes/resume.js";
-import { getPhoneCallConfig } from "./server/vapiPhone.js";
 
 const REQUIRED_ENV_VARS = ["GEMINI_API_KEY", "VITE_VAPI_PUBLIC_KEY", "VITE_VAPI_ASSISTANT_ID"] as const;
 
@@ -16,19 +15,13 @@ for (const name of REQUIRED_ENV_VARS) {
     console.warn(`[warn] Missing env var ${name}. Add it to .env (see .env.example).`);
   }
 }
-{
-  const phone = getPhoneCallConfig();
-  if (!phone.configured) {
-    console.warn(`[info] "Call on phone" is disabled until ${phone.missingEnvVars.join(", ")} ${phone.missingEnvVars.length > 1 ? "are" : "is"} set in .env.`);
-  }
-}
 
 async function main(): Promise<void> {
   const app = express();
   app.use(express.json({ limit: "2mb" }));
 
   app.get("/api/health", (_req: Request, res: Response) => {
-    res.json({ ok: true, geminiConfigured: Boolean(process.env.GEMINI_API_KEY), phoneCall: getPhoneCallConfig() });
+    res.json({ ok: true, geminiConfigured: Boolean(process.env.GEMINI_API_KEY) });
   });
 
   app.use("/api/candidates", candidatesRouter);

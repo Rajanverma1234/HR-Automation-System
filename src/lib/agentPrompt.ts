@@ -1,4 +1,4 @@
-// The prompt builder lives in shared/ so the server's phone call uses the same per-candidate script.
+// The prompt builder lives in shared/agentPrompt.ts.
 export {
   buildAssistantOverrides,
   buildFirstMessage,

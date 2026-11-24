@@ -1,6 +1,6 @@
-import type { ApiErrorBody, CallRecord, Candidate, PhoneCallConfig, PhoneCallJob, SaveCallRequest } from "../shared/types";
+import type { ApiErrorBody, CallRecord, Candidate, SaveCallRequest } from "../shared/types";
 
-export type HealthResponse = { ok: boolean; geminiConfigured: boolean; phoneCall: PhoneCallConfig };
+export type HealthResponse = { ok: boolean; geminiConfigured: boolean };
 
 export class ApiRequestError extends Error {
   readonly status: number;
@@ -92,21 +92,6 @@ export function saveCall(candidateId: string, payload: SaveCallRequest): Promise
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-}
-
-/** Asks the server to dial the candidate through Vapi. Resolves with the new job (status "dialing"). */
-export function startPhoneCall(candidateId: string): Promise<PhoneCallJob> {
-  return request<PhoneCallJob>(`/api/candidates/${encodeURIComponent(candidateId)}/phone-call`, { method: "POST" });
-}
-
-/** The candidate's latest phone call job, or null if none was placed since the server started. */
-export async function getPhoneCall(candidateId: string, signal?: AbortSignal): Promise<PhoneCallJob | null> {
-  try {
-    return await request<PhoneCallJob>(`/api/candidates/${encodeURIComponent(candidateId)}/phone-call`, { signal });
-  } catch (err) {
-    if (err instanceof ApiRequestError && err.status === 404 && err.code === "NO_PHONE_CALL") return null;
-    throw err;
-  }
 }
 
 export function errorMessage(err: unknown): string {

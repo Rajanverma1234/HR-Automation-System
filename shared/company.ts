@@ -1,4 +1,4 @@
-// Company and agent facts used by both the browser call (src/) and the server phone call (server/).
+// Company and agent facts for the voice agent's script. Kept in shared/ so scripts and the server can use them too.
 
 /** The name the voice agent introduces itself with. */
 export const AGENT_NAME = "Priya";
