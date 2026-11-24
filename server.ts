@@ -5,6 +5,7 @@ import { createServer as createViteServer } from "vite";
 import type { ApiErrorBody } from "./shared/types.js";
 import { AppError } from "./server/errors.js";
 import { candidatesRouter } from "./server/routes/candidates.js";
+import { exportRouter } from "./server/routes/export.js";
 import { resumeRouter } from "./server/routes/resume.js";
 
 const REQUIRED_ENV_VARS = ["GEMINI_API_KEY", "VITE_VAPI_PUBLIC_KEY", "VITE_VAPI_ASSISTANT_ID"] as const;
@@ -25,6 +26,7 @@ async function main(): Promise<void> {
 
   app.use("/api/candidates", candidatesRouter);
   app.use("/api/resume", resumeRouter);
+  app.use("/api", exportRouter);
 
   app.use("/api", (_req: Request, res: Response<ApiErrorBody>) => {
     res.status(404).json({ error: "Not found" });

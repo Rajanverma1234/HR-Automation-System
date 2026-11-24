@@ -209,7 +209,7 @@ function PanelBody({
         <dl className="flex flex-col gap-2 text-sm">
           <IconRow icon={<Phone className="h-4 w-4" />} label="Phone">
             {r.phone ? (
-              <a href={`tel:${r.phone.replace(/[^\d+]/g, "")}`} className="rounded text-indigo-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">
+              <a href={`tel:${r.phone.replace(/[^\d+]/g, "")}`} className="-my-3 inline-flex min-h-11 items-center rounded text-indigo-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">
                 {r.phone}
               </a>
             ) : (
@@ -218,7 +218,7 @@ function PanelBody({
           </IconRow>
           <IconRow icon={<Mail className="h-4 w-4" />} label="Email">
             {r.email ? (
-              <a href={`mailto:${r.email}`} className="break-all rounded text-indigo-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">
+              <a href={`mailto:${r.email}`} className="-my-3 inline-flex min-h-11 items-center break-all rounded text-indigo-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">
                 {r.email}
               </a>
             ) : (
@@ -320,7 +320,7 @@ function IconRow({ icon, label, children }: { icon: ReactNode; label: string; ch
       <span className="mt-0.5 text-slate-400" aria-hidden>
         {icon}
       </span>
-      <dt className="w-32 shrink-0 text-slate-500">{label}</dt>
+      <dt className="w-24 shrink-0 text-slate-500 sm:w-32">{label}</dt>
       <dd className="min-w-0 flex-1 text-slate-900">{children}</dd>
     </div>
   );

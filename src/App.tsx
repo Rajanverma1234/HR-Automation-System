@@ -1,7 +1,7 @@
-import { AlertTriangle, RefreshCw, UserSearch } from "lucide-react";
+import { AlertTriangle, Download, Loader2, RefreshCw, UserSearch } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Candidate } from "../shared/types";
-import { errorMessage, getHealth, listCandidates, type HealthResponse } from "./api";
+import { downloadExportCsv, errorMessage, getHealth, listCandidates, type HealthResponse } from "./api";
 import CallModal from "./components/CallModal";
 import CandidateDetailPanel from "./components/CandidateDetailPanel";
 import CandidateGrid from "./components/CandidateGrid";
@@ -41,6 +41,7 @@ function Dashboard() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [panelRefreshKey, setPanelRefreshKey] = useState(0);
   const [callingCandidate, setCallingCandidate] = useState<Candidate | null>(null);
+  const [exporting, setExporting] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<Candidate | null>(null);
 
   const normalizedQuery = query.trim().toLowerCase();
@@ -90,6 +91,25 @@ function Dashboard() {
     toast.success(`Added ${candidate.resumeData.name ?? "candidate"} from ${candidate.resumeFileName}`);
   }
 
+  async function handleExport() {
+    setExporting(true);
+    try {
+      const { blob, fileName } = await downloadExportCsv();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+      toast.error(`Export failed: ${errorMessage(err)}`);
+    } finally {
+      setExporting(false);
+    }
+  }
+
   function handleDeleted(id: string, name: string | null) {
     setCandidates((list) => list.filter((c) => c.id !== id));
     setPendingDelete(null);
@@ -117,14 +137,24 @@ function Dashboard() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-4 sm:px-6 lg:px-8">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-600 text-white">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-4 py-4 sm:px-6 lg:px-8">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-white">
             <UserSearch className="h-5 w-5" aria-hidden />
           </div>
-          <div>
+          <div className="min-w-0 flex-1">
             <h1 className="text-lg font-semibold leading-tight">HR Screening Agent</h1>
             <p className="text-xs text-slate-500">Upload a resume, review the candidate, start a screening call.</p>
           </div>
+          <button
+            type="button"
+            onClick={() => void handleExport()}
+            disabled={candidates.length === 0 || exporting}
+            title={candidates.length === 0 ? "Add a candidate to enable export" : "Download all candidates and calls as CSV"}
+            className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {exporting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Download className="h-4 w-4" aria-hidden />}
+            Export CSV
+          </button>
         </div>
       </header>
 
@@ -152,6 +182,7 @@ function Dashboard() {
           </h2>
           <UploadDropzone
             onUploaded={handleUploaded}
+            onError={(message) => toast.error(message)}
             disabled={geminiMissing || healthError !== null}
             disabledReason={
               geminiMissing

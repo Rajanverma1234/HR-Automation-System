@@ -24,7 +24,8 @@ function isApiErrorBody(value: unknown): value is ApiErrorBody {
   );
 }
 
-async function request<T>(url: string, init?: RequestInit): Promise<T> {
+/** fetch() that throws ApiRequestError for network failures and non-2xx responses. */
+async function fetchOrThrow(url: string, init?: RequestInit): Promise<Response> {
   let res: Response;
   try {
     res = await fetch(url, init);
@@ -43,9 +44,22 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
     if (isApiErrorBody(body)) throw new ApiRequestError(body.error, res.status, body.code);
     throw new ApiRequestError(res.statusText || `Request failed (HTTP ${res.status})`, res.status);
   }
+  return res;
+}
 
+async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetchOrThrow(url, init);
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
+}
+
+/** Downloads the CSV export as a Blob, with the server-suggested filename. */
+export async function downloadExportCsv(): Promise<{ blob: Blob; fileName: string }> {
+  const res = await fetchOrThrow("/api/export.csv");
+  const disposition = res.headers.get("Content-Disposition") ?? "";
+  const match = /filename="?([^";]+)"?/i.exec(disposition);
+  const fileName = match?.[1] ?? `candidates-${new Date().toISOString().slice(0, 10)}.csv`;
+  return { blob: await res.blob(), fileName };
 }
 
 export function getHealth(): Promise<HealthResponse> {

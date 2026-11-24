@@ -55,6 +55,14 @@ export async function generateJson<T>({
       console.error("[gemini] rate limited:", err.message);
       throw new AppError(429, "Gemini rate limit reached. Wait a minute and retry.", "GEMINI_RATE_LIMIT");
     }
+    if (err instanceof ApiError && err.status === 503) {
+      console.error("[gemini] overloaded:", err.message);
+      throw new AppError(
+        502,
+        "The AI service is overloaded right now. Please try again in a minute.",
+        "GEMINI_OVERLOADED",
+      );
+    }
     if (controller.signal.aborted) {
       throw failed(new Error(`Gemini request timed out after ${TIMEOUT_MS / 1000}s`, { cause: err }));
     }

@@ -110,14 +110,14 @@ export default function CandidateCard({
         <p className="text-xs text-slate-400">No skills listed</p>
       )}
 
-      <div className="flex flex-col gap-1 text-sm">
+      <div className="-my-2 flex flex-col text-sm">
         <ContactRow icon={<Phone className="h-4 w-4 text-slate-400" aria-hidden />} label="Phone">
           {r.phone ? (
             <a
               href={`tel:${r.phone.replace(/[^\d+]/g, "")}`}
               onClick={stop}
               onKeyDown={stop}
-              className="truncate rounded text-indigo-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+              className="inline-flex min-h-11 min-w-0 items-center truncate rounded text-indigo-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
             >
               {r.phone}
             </a>
@@ -131,9 +131,9 @@ export default function CandidateCard({
               href={`mailto:${r.email}`}
               onClick={stop}
               onKeyDown={stop}
-              className="truncate rounded text-indigo-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+              className="inline-flex min-h-11 min-w-0 items-center rounded text-indigo-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
             >
-              {r.email}
+              <span className="truncate">{r.email}</span>
             </a>
           ) : (
             <span className="text-slate-400">{display(null)}</span>

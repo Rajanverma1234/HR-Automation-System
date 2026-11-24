@@ -14,6 +14,8 @@ type State =
 
 type Props = {
   onUploaded: (candidate: Candidate) => void;
+  /** Called with the server's message when an upload fails (client-side validation errors stay inline). */
+  onError?: (message: string) => void;
   disabled?: boolean;
   disabledReason?: string;
 };
@@ -30,7 +32,7 @@ function validate(file: File): string | null {
   return null;
 }
 
-export default function UploadDropzone({ onUploaded, disabled = false, disabledReason }: Props) {
+export default function UploadDropzone({ onUploaded, onError, disabled = false, disabledReason }: Props) {
   const [state, setState] = useState<State>({ kind: "idle" });
   const inputRef = useRef<HTMLInputElement>(null);
   const dragDepth = useRef(0);
@@ -51,7 +53,9 @@ export default function UploadDropzone({ onUploaded, disabled = false, disabledR
       setState({ kind: "idle" });
       onUploaded(candidate);
     } catch (err) {
-      setState({ kind: "error", message: errorMessage(err) });
+      const message = errorMessage(err);
+      setState({ kind: "error", message });
+      onError?.(message);
     }
   }
 

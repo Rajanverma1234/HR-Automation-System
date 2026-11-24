@@ -23,9 +23,22 @@
   }
 }
 
+html,
+body {
+  overflow-x: hidden;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  /* Decorative motion off; spinners keep turning so loading stays visible. */
   .animate-slide-in,
-  .animate-fade-in {
-    animation: none;
+  .animate-fade-in,
+  .animate-pulse {
+    animation: none !important;
+  }
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
