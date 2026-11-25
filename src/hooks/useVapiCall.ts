@@ -53,8 +53,21 @@ function hasProp<K extends string>(value: unknown, key: K): value is Record<K, u
   return typeof value === "object" && value !== null && key in value;
 }
 
+const NETWORK_ERROR_MESSAGE =
+  "Couldn't connect to the voice service. Please check your internet connection (or try another network / turn off VPN or ad-blocker) and press Try again.";
+
+/** The browser's wording for "the request never reached the server" (Chrome/Edge, Firefox, Safari). */
+function isNetworkFailure(message: string): boolean {
+  return /failed to fetch|networkerror|network request failed|load failed|err_internet_disconnected|err_name_not_resolved/i.test(message);
+}
+
 /** Vapi/Daily errors come in many shapes; dig out something a human can read. */
 function readableVapiError(e: unknown): string {
+  const message = rawVapiError(e);
+  return isNetworkFailure(message) ? NETWORK_ERROR_MESSAGE : message;
+}
+
+function rawVapiError(e: unknown): string {
   if (typeof e === "string" && e.trim()) return e;
   if (hasProp(e, "error")) {
     const inner = e.error;
