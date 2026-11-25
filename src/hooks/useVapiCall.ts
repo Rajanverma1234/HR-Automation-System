@@ -95,6 +95,29 @@ function isNormalHangup(message: string): boolean {
   return /meeting has ended|meeting ended|ejected/i.test(message);
 }
 
+/** Vapi's own reason for ending a call ("status-update" message), e.g. "call.in-progress.error-vapifault-…". */
+function endedReasonOf(message: unknown): string | null {
+  if (!hasProp(message, "type") || message.type !== "status-update") return null;
+  if (!hasProp(message, "status") || message.status !== "ended") return null;
+  return hasProp(message, "endedReason") && typeof message.endedReason === "string" && message.endedReason.trim()
+    ? message.endedReason.trim()
+    : null;
+}
+
+/** Turns Vapi's ended reason into something a recruiter or candidate can act on. */
+function describeEndedReason(reason: string): string {
+  if (/credit|wallet|balance|subscription|billing|payment/i.test(reason)) {
+    return `The voice service account is out of credits, so the call couldn't start. HR has been notified; please try again later. (${reason})`;
+  }
+  if (/assistant-not-found|assistant-not-valid|assistant-request/i.test(reason)) {
+    return `The voice assistant isn't set up correctly on Vapi, so the call couldn't start. (${reason})`;
+  }
+  if (/voice|11labs|eleven|azure|cartesia|playht|deepgram|transcriber|llm|openai|model|pipeline|vapifault|providerfault/i.test(reason)) {
+    return `The voice service had a problem starting the call. Please try again in a minute. (${reason})`;
+  }
+  return `The voice service ended the call. (${reason})`;
+}
+
 function domExceptionName(err: unknown): string | null {
   return hasProp(err, "name") && typeof err.name === "string" ? err.name : null;
 }
@@ -125,6 +148,8 @@ export function useVapiCall({ onEnded }: Options) {
   const mountedRef = useRef(false);
   /** True from just before vapi.start() until the call is over. */
   const activeRef = useRef(false);
+  /** Vapi's reason for ending the current call, if it sent one. */
+  const endedReasonRef = useRef<string | null>(null);
   const onEndedRef = useRef(onEnded);
   onEndedRef.current = onEnded;
 
@@ -200,6 +225,12 @@ export function useVapiCall({ onEnded }: Options) {
     const onSpeechStart = () => setIsAgentSpeaking(true);
     const onSpeechEnd = () => setIsAgentSpeaking(false);
     const onMessage = (message: unknown) => {
+      const endedReason = endedReasonOf(message);
+      if (endedReason) {
+        endedReasonRef.current = endedReason;
+        console.warn("[vapi] call ended by Vapi:", endedReason);
+        return;
+      }
       if (!isTranscriptMessage(message)) return;
       const role: TranscriptLine["role"] = message.role === "assistant" ? "assistant" : "user";
       if (message.transcriptType === "final") {
@@ -226,7 +257,7 @@ export function useVapiCall({ onEnded }: Options) {
       finalize();
     };
     const onError = (e: unknown) => {
-      const message = readableVapiError(e);
+      let message = readableVapiError(e);
       console.error("[vapi] error:", e);
       const wasLive = statusRef.current === "live" || statusRef.current === "ending";
       if (wasLive && isNormalHangup(message)) {
@@ -234,6 +265,8 @@ export function useVapiCall({ onEnded }: Options) {
         finalize();
         return;
       }
+      // "Meeting has ended" before the call went live: Vapi shut it down; its status-update says why.
+      if (isNormalHangup(message) && endedReasonRef.current) message = describeEndedReason(endedReasonRef.current);
       fail(message);
       // Keep whatever was captured: a live call's transcript is still saved.
       if (wasLive) finalize();
@@ -278,6 +311,7 @@ export function useVapiCall({ onEnded }: Options) {
       transcriptRef.current = [];
       startedAtRef.current = null;
       callIdRef.current = null;
+      endedReasonRef.current = null;
       finalizedRef.current = false;
       setTranscript([]);
       setPartial(null);
