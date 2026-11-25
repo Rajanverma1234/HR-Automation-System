@@ -109,6 +109,9 @@ function describeEndedReason(reason: string): string {
   if (/credit|wallet|balance|subscription|billing|payment/i.test(reason)) {
     return `The voice service account is out of credits, so the call couldn't start. HR has been notified; please try again later. (${reason})`;
   }
+  if (/did-not-receive-customer-audio/i.test(reason)) {
+    return "We couldn't hear your microphone, so the call ended. Check that the right microphone is selected and not muted, then try again. If it keeps happening, switch to another network (e.g. a mobile hotspot): some Wi-Fi networks block voice calls.";
+  }
   if (/assistant-not-found|assistant-not-valid|assistant-request/i.test(reason)) {
     return `The voice assistant isn't set up correctly on Vapi, so the call couldn't start. (${reason})`;
   }
