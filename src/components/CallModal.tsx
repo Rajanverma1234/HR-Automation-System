@@ -17,7 +17,10 @@ type Props = {
   candidate: Candidate;
   onClose: () => void;
   onSaved: (candidate: Candidate) => void;
-  onViewDetails: (id: string) => void;
+  /** Recruiter only: open the candidate's details after the call. */
+  onViewDetails?: (id: string) => void;
+  /** "candidate": the self-service /apply page. The candidate never sees the analysis or recommendation. */
+  audience?: "recruiter" | "candidate";
 };
 
 type SavePhase =
@@ -33,7 +36,7 @@ const recommendationStyle = {
   reject: "bg-red-50 text-red-700 ring-red-200",
 } as const;
 
-export default function CallModal({ candidate, onClose, onSaved, onViewDetails }: Props) {
+export default function CallModal({ candidate, onClose, onSaved, onViewDetails, audience = "recruiter" }: Props) {
   const [save, setSave] = useState<SavePhase>({ kind: "none" });
   const [payload, setPayload] = useState<SaveCallRequest | null>(null);
   const [confirmEnd, setConfirmEnd] = useState(false);
@@ -175,12 +178,16 @@ export default function CallModal({ candidate, onClose, onSaved, onViewDetails }
                 <Notice tone="amber">The call ended with an error: {call.error}</Notice>
               )}
               <LiveTranscript lines={call.transcript} partial={call.partial} status={status} />
-              <ResultArea
-                save={save}
-                onRetrySave={() => payload && void doSave(payload)}
-                onViewDetails={() => onViewDetails(candidate.id)}
-                onClose={onClose}
-              />
+              {audience === "candidate" ? (
+                <CandidateResult save={save} onRetrySave={() => payload && void doSave(payload)} onClose={onClose} />
+              ) : (
+                <ResultArea
+                  save={save}
+                  onRetrySave={() => payload && void doSave(payload)}
+                  onViewDetails={onViewDetails ? () => onViewDetails(candidate.id) : undefined}
+                  onClose={onClose}
+                />
+              )}
             </>
           )}
 
@@ -294,7 +301,7 @@ function ResultArea({
 }: {
   save: SavePhase;
   onRetrySave: () => void;
-  onViewDetails: () => void;
+  onViewDetails: (() => void) | undefined;
   onClose: () => void;
 }) {
   if (save.kind === "none") return null;
@@ -360,7 +367,54 @@ function ResultArea({
       )}
       <Actions>
         <SecondaryButton onClick={onClose}>Close</SecondaryButton>
-        <PrimaryButton onClick={onViewDetails}>View details</PrimaryButton>
+        {onViewDetails && <PrimaryButton onClick={onViewDetails}>View details</PrimaryButton>}
+      </Actions>
+    </>
+  );
+}
+
+/** What the candidate sees after the call: a thank-you, never the analysis or the recommendation. */
+function CandidateResult({ save, onRetrySave, onClose }: { save: SavePhase; onRetrySave: () => void; onClose: () => void }) {
+  if (save.kind === "none") return null;
+  if (save.kind === "nothing-captured") {
+    return (
+      <>
+        <Notice tone="slate">The call ended before we could talk. You can close this and start the call again.</Notice>
+        <Actions>
+          <SecondaryButton onClick={onClose}>Close</SecondaryButton>
+        </Actions>
+      </>
+    );
+  }
+  if (save.kind === "saving") {
+    return (
+      <div className="flex items-center gap-2 rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-900" role="status">
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+        Sending your answers to the HR team…
+      </div>
+    );
+  }
+  if (save.kind === "save-error") {
+    return (
+      <>
+        <Notice tone="red">We couldn't send your answers: {save.message}</Notice>
+        <Actions>
+          <PrimaryButton onClick={onRetrySave}>
+            <RefreshCw className="h-4 w-4" aria-hidden />
+            Try again
+          </PrimaryButton>
+        </Actions>
+      </>
+    );
+  }
+  return (
+    <>
+      <div className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900" role="status">
+        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+        <p>Thank you! Your screening call is complete and has been shared with our HR team. They will get back to you soon.</p>
+      </div>
+      <Actions>
+        <PrimaryButton onClick={onClose}>Done</PrimaryButton>
       </Actions>
     </>
   );

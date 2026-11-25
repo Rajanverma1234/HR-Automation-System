@@ -39,7 +39,7 @@ export default function CandidateGrid({
     return (
       <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center">
         <Users className="h-10 w-10 text-slate-300" aria-hidden />
-        <p className="text-sm text-slate-600">No candidates yet — upload a resume to get started.</p>
+        <p className="text-sm text-slate-600">No candidates yet. Share the candidate link above; each candidate appears here after uploading a resume.</p>
       </div>
     );
   }

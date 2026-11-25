@@ -164,7 +164,7 @@ class Page {
       if (await this.eval<boolean>(`Boolean(${expression})`)) return;
       await sleep(300);
     }
-    const dialog = await this.eval<string>(`document.querySelector('[role=dialog]')?.innerText ?? '(no dialog)'`);
+    const dialog = await this.eval<string>(`document.querySelector('[role=dialog]')?.innerText ?? '(no dialog) page: ' + document.body.innerText`);
     check(false, label, `Timed out after ${timeoutMs / 1000}s. Dialog text:\n${dialog.slice(0, 1500)}`);
   }
   /** Clicks the first visible button whose text (or aria-label) matches, optionally inside `scope`. */
@@ -211,6 +211,7 @@ let edge: ChildProcess | null = null;
 let cdp: Cdp | null = null;
 let profileDir: string | null = null;
 let candidateId: string | null = null;
+let appliedId: string | null = null;
 
 async function main(): Promise<void> {
   console.log(`Browser call test (demo voice, headless Edge) on ${BASE}\n`);
@@ -362,13 +363,48 @@ async function main(): Promise<void> {
     JSON.stringify(callB?.transcript),
   );
 
+  // ---------- Scenario C: candidate self-service link (/apply) ----------
+  await page.eval(`window.__fake.mode = "full"`);
+  await page.send("Page.navigate", { url: `${BASE}/apply` });
+  await page.waitFor(`document.querySelector('input[type=file]')`, "/apply shows the resume upload", 20_000);
+  const applyText = await page.eval<string>("document.body.innerText");
+  check(!applyText.includes("Candidates") && !applyText.includes(name), "/apply shows no dashboard and no other candidates");
+  const { root } = (await page.send("DOM.getDocument", { depth: -1, pierce: true })) as { root: { nodeId: number } };
+  const { nodeId } = (await page.send("DOM.querySelector", { nodeId: root.nodeId, selector: "input[type=file]" })) as { nodeId: number };
+  await page.send("DOM.setFileInputFiles", { nodeId, files: [SAMPLE_DOCX] });
+  await page.waitFor(`[...document.querySelectorAll('button')].some((b) => b.innerText.includes('Start call'))`, "after upload, the Start call button appears", 90_000);
+  check(true, "candidate uploaded a resume on /apply → Start call button");
+  await page.click("Start call");
+  await page.waitFor(`document.querySelector('[role=dialog]')?.innerText.includes('Thank you!')`, "candidate sees the thank-you after the call", 180_000);
+  const candidateDialog = await page.eval<string>(`document.querySelector('[role=dialog]').innerText`);
+  check(!/shortlist|reject|hold|Call saved|View details/i.test(candidateDialog), "candidate never sees the analysis or recommendation", candidateDialog.slice(0, 600));
+  await page.click("Done");
+  await page.waitFor(`document.body.innerText.includes('All done')`, "/apply shows All done", 10_000);
+  check(true, "/apply shows \"All done\" after the call");
+
+  const all = (await (await fetch(`${BASE}/api/candidates`)).json()) as Candidate[];
+  const applied = all.find((c) => c.id !== candidate.id && c.resumeFileName === "sample-resume.docx" && c.calls.length === 1);
+  check(applied !== undefined, "the /apply candidate is saved with its call");
+  appliedId = applied.id;
+  check(applied.calls[0]?.analysis !== null && (applied.calls[0]?.transcript.length ?? 0) > 10, `its transcript (${applied.calls[0]?.transcript.length} lines) is analysed`);
+
+  // HR dashboard: no upload box, candidate link instead, and the new card is there.
+  await page.send("Page.navigate", { url: BASE });
+  await page.waitFor(`document.querySelectorAll('[aria-label=${JSON.stringify(`Open ${name}`)}]').length >= 2`, "HR dashboard shows the /apply candidate's card", 30_000);
+  check(true, "HR dashboard shows the /apply candidate's card");
+  const dash = await page.eval<{ upload: boolean; link: string }>(
+    `({ upload: Boolean(document.querySelector('input[type=file]')), link: document.getElementById('candidate-link')?.value ?? '' })`,
+  );
+  check(!dash.upload && dash.link === `${BASE}/apply`, `HR dashboard has no upload box and shows the candidate link (${dash.link})`);
+
   check(pageErrors.length === 0, "no errors in the browser console", pageErrors.join("\n"));
 }
 
 async function cleanup(): Promise<void> {
-  if (candidateId) {
-    await fetch(`${BASE}/api/candidates/${candidateId}`, { method: "DELETE" }).catch(() => undefined);
-    console.log(`   cleaned up test candidate ${candidateId}`);
+  for (const id of [candidateId, appliedId]) {
+    if (!id) continue;
+    await fetch(`${BASE}/api/candidates/${id}`, { method: "DELETE" }).catch(() => undefined);
+    console.log(`   cleaned up test candidate ${id}`);
   }
   try {
     await cdp?.send("Browser.close");

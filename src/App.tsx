@@ -1,5 +1,5 @@
-import { AlertTriangle, Download, Loader2, RefreshCw, UserSearch } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { AlertTriangle, Check, Copy, Download, ExternalLink, Loader2, RefreshCw, UserSearch } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { formatInterviewWhen, interviewState } from "../shared/interview";
 import type { Candidate } from "../shared/types";
 import { downloadExportCsv, errorMessage, getHealth, listCandidates, type HealthResponse } from "./api";
@@ -9,11 +9,13 @@ import CandidateGrid from "./components/CandidateGrid";
 import DeleteCandidateDialog from "./components/DeleteCandidateDialog";
 import { ToastProvider, useToast } from "./components/Toast";
 import Toolbar, { type StatusFilter } from "./components/Toolbar";
-import UploadDropzone from "./components/UploadDropzone";
 import VoicePicker from "./components/VoicePicker";
 import { isBrowserVoiceSupported } from "./hooks/useBrowserVoiceCall";
 import { useNow } from "./hooks/useNow";
 import { isVapiConfigured, vapiMissingEnvVars } from "./lib/vapiConfig";
+
+/** How often the dashboard quietly refetches candidates while the tab is visible. */
+const REFRESH_MS = 20_000;
 
 /** Vapi if configured, otherwise the free browser-voice demo (Chrome/Edge). */
 const canCall = isVapiConfigured || isBrowserVoiceSupported;
@@ -111,12 +113,44 @@ function Dashboard() {
     void load();
   }, [load]);
 
-  const geminiMissing = health !== null && !health.geminiConfigured;
+  // Keep the dashboard current when calls, uploads or edits happen in another browser (e.g. a shared link):
+  // refetch quietly every 20 s while the tab is visible, and whenever the tab regains focus.
+  const candidatesRef = useRef(candidates);
+  candidatesRef.current = candidates;
+  const openIdRef = useRef(openId);
+  openIdRef.current = openId;
+  useEffect(() => {
+    let inFlight = false;
+    async function refresh() {
+      if (inFlight || document.visibilityState !== "visible") return;
+      inFlight = true;
+      try {
+        const list = await listCandidates();
+        const openNow = openIdRef.current;
+        const before = candidatesRef.current.find((c) => c.id === openNow);
+        const after = list.find((c) => c.id === openNow);
+        setCandidates(list);
+        setLoadError(null);
+        // The open detail panel fetches its own copy; reload it if that candidate changed.
+        if (before && after && before.updatedAt !== after.updatedAt) setPanelRefreshKey((k) => k + 1);
+      } catch {
+        // Keep showing the current list; the next tick retries.
+      } finally {
+        inFlight = false;
+      }
+    }
+    const timer = setInterval(() => void refresh(), REFRESH_MS);
+    const onVisible = () => void refresh();
+    window.addEventListener("focus", onVisible);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", onVisible);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
 
-  function handleUploaded(candidate: Candidate) {
-    setCandidates((list) => [candidate, ...list.filter((c) => c.id !== candidate.id)]);
-    toast.success(`Added ${candidate.resumeData.name ?? "candidate"} from ${candidate.resumeFileName}`);
-  }
+  const geminiMissing = health !== null && !health.geminiConfigured;
 
   async function handleExport() {
     setExporting(true);
@@ -179,7 +213,7 @@ function Dashboard() {
           </div>
           <div className="min-w-0 flex-1">
             <h1 className="text-lg font-semibold leading-tight">HR Screening Agent</h1>
-            <p className="text-xs text-slate-500">Upload a resume, review the candidate, start a screening call.</p>
+            <p className="text-xs text-slate-500">Share the candidate link, then review each candidate's AI screening call.</p>
           </div>
           <button
             type="button"
@@ -249,23 +283,7 @@ function Dashboard() {
           </Banner>
         )}
 
-        <section aria-labelledby="upload-heading" className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 id="upload-heading" className="mb-3 text-sm font-semibold text-slate-700">
-            Add a candidate
-          </h2>
-          <UploadDropzone
-            onUploaded={handleUploaded}
-            onError={(message) => toast.error(message)}
-            disabled={geminiMissing || healthError !== null}
-            disabledReason={
-              geminiMissing
-                ? "Uploads are disabled until GEMINI_API_KEY is configured."
-                : healthError !== null
-                  ? "Uploads are disabled until the server is reachable."
-                  : undefined
-            }
-          />
-        </section>
+        <CandidateLinkCard onCopied={() => toast.success("Candidate link copied. Send it on WhatsApp or email.")} />
 
         <section aria-labelledby="candidates-heading" className="flex flex-col gap-3">
           <h2 id="candidates-heading" className="text-sm font-semibold text-slate-700">
@@ -336,6 +354,65 @@ function Dashboard() {
       />
 
     </div>
+  );
+}
+
+/** The link HR sends to candidates: /apply, where they upload a resume and take the AI screening call themselves. */
+function CandidateLinkCard({ onCopied }: { onCopied: () => void }) {
+  const link = `${window.location.origin}/apply`;
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(link);
+    } catch {
+      // Clipboard blocked (e.g. insecure context): select the text so it can be copied by hand.
+      const input = document.getElementById("candidate-link") as HTMLInputElement | null;
+      input?.select();
+      return;
+    }
+    setCopied(true);
+    onCopied();
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  return (
+    <section aria-labelledby="candidate-link-heading" className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <h2 id="candidate-link-heading" className="text-sm font-semibold text-slate-700">
+        Candidate link
+      </h2>
+      <p className="mt-1 text-sm text-slate-500">
+        Send this link to candidates. They upload their resume and talk to the AI HR assistant; their card, transcript and analysis appear
+        here automatically.
+      </p>
+      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+        <input
+          id="candidate-link"
+          readOnly
+          value={link}
+          onFocus={(e) => e.currentTarget.select()}
+          aria-label="Candidate link"
+          className="min-h-11 flex-1 rounded-lg border border-slate-300 bg-slate-50 px-3 text-sm text-slate-700 focus:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
+        />
+        <button
+          type="button"
+          onClick={() => void copy()}
+          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
+        >
+          {copied ? <Check className="h-4 w-4" aria-hidden /> : <Copy className="h-4 w-4" aria-hidden />}
+          {copied ? "Copied" : "Copy link"}
+        </button>
+        <a
+          href={link}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+        >
+          <ExternalLink className="h-4 w-4" aria-hidden />
+          Preview
+        </a>
+      </div>
+    </section>
   );
 }
 

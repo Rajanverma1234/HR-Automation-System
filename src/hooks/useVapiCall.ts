@@ -42,6 +42,13 @@ function isTranscriptMessage(message: unknown): message is TranscriptMessage {
   );
 }
 
+/** Joins two transcript fragments, dropping a sentence-ending period the transcriber put mid-sentence ("I'm." + "calling"). */
+function joinFragments(previous: string, next: string): string {
+  const startsLower = /^[a-z]/.test(next);
+  const head = startsLower ? previous.replace(/\.$/, "") : previous;
+  return `${head} ${next}`;
+}
+
 function hasProp<K extends string>(value: unknown, key: K): value is Record<K, unknown> {
   return typeof value === "object" && value !== null && key in value;
 }
@@ -185,8 +192,15 @@ export function useVapiCall({ onEnded }: Options) {
       if (message.transcriptType === "final") {
         const text = message.transcript.trim();
         if (text) {
-          const line: TranscriptLine = { role, text, at: new Date().toISOString() };
-          transcriptRef.current = [...transcriptRef.current, line];
+          const now = new Date().toISOString();
+          const lines = transcriptRef.current;
+          const last = lines[lines.length - 1];
+          // Vapi often sends one spoken turn as several "final" fragments ("I'm." / "Calling about." / "The AI.").
+          // Consecutive fragments from the same speaker are one turn: append to the previous line.
+          transcriptRef.current =
+            last && last.role === role
+              ? [...lines.slice(0, -1), { ...last, text: joinFragments(last.text, text) }]
+              : [...lines, { role, text, at: now }];
           setTranscript(transcriptRef.current);
         }
         setPartial(null);
