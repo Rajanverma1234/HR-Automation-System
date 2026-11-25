@@ -13,10 +13,12 @@
 //
 // Needs GEMINI_API_KEY in .env and Microsoft Edge (or set EDGE_PATH). Uses Gemini, not Vapi: no call credits.
 import { spawn, type ChildProcess } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { hashPassword } from "../server/auth.js";
 import { addDays, officeDate, slotToIso } from "../shared/interview.js";
 import type { Candidate } from "../shared/types.js";
 
@@ -27,6 +29,16 @@ const BASE = `http://localhost:${PORT}`;
 const ROOT = process.cwd();
 const SAMPLE_DOCX = path.join(ROOT, "samples", "sample-resume.docx");
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+/** The test server runs with HR login on, using this throwaway account. */
+const HR_EMAIL = "test-hr@example.com";
+const HR_PASSWORD = randomBytes(12).toString("base64url");
+let hrCookie = "";
+
+/** fetch() as the signed-in HR user (Node side; the browser keeps its own cookie). */
+function hrFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  return fetch(url, { ...init, headers: { ...(init.headers as Record<string, string> | undefined), Cookie: hrCookie } });
+}
+
 const PARTIAL_WORDS = "Haan main abhi baat kar sakta hoon, bas ek";
 
 /** Candidate answers keyed by the agent's question. The last one books the interview in Hinglish. */
@@ -202,7 +214,7 @@ async function waitForHttp(url: string, timeoutMs: number): Promise<Response> {
 }
 
 async function getCandidate(id: string): Promise<Candidate> {
-  return (await (await fetch(`${BASE}/api/candidates/${id}`)).json()) as Candidate;
+  return (await (await hrFetch(`${BASE}/api/candidates/${id}`)).json()) as Candidate;
 }
 
 // ---------- the test ----------
@@ -219,7 +231,15 @@ async function main(): Promise<void> {
   server = spawn(process.execPath, [path.join(ROOT, "node_modules", "tsx", "dist", "cli.mjs"), "server.ts"], {
     cwd: ROOT,
     // Blank Vapi keys force the free demo voice; process env wins over .env in both dotenv and Vite.
-    env: { ...process.env, PORT: String(PORT), HMR_PORT: String(HMR_PORT), VITE_VAPI_PUBLIC_KEY: "", VITE_VAPI_ASSISTANT_ID: "" },
+    env: {
+      ...process.env,
+      PORT: String(PORT),
+      HMR_PORT: String(HMR_PORT),
+      VITE_VAPI_PUBLIC_KEY: "",
+      VITE_VAPI_ASSISTANT_ID: "",
+      HR_USERS: `${HR_EMAIL}:${await hashPassword(HR_PASSWORD)}`,
+      AUTH_SECRET: randomBytes(32).toString("base64url"),
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let serverLog = "";
@@ -231,7 +251,18 @@ async function main(): Promise<void> {
     console.log(serverLog);
     throw err;
   }
-  check(true, `test server up on port ${PORT} (Vapi keys blanked → demo voice)`);
+  check(true, `test server up on port ${PORT} (Vapi keys blanked → demo voice, HR login on)`);
+
+  // HR login (API level): locked without a session, open with one.
+  const locked = await fetch(`${BASE}/api/candidates`);
+  check(locked.status === 401, `GET /api/candidates without signing in → 401 (got ${locked.status})`);
+  const signIn = await fetch(`${BASE}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: HR_EMAIL, password: HR_PASSWORD }),
+  });
+  hrCookie = (signIn.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+  check(signIn.ok && hrCookie.startsWith("hr_session="), "HR sign-in via API returns a session cookie");
 
   // Test candidate from the committed sample resume.
   const form = new FormData();
@@ -278,6 +309,22 @@ async function main(): Promise<void> {
   await page.send("Page.addScriptToEvaluateOnNewDocument", { source: FAKE_SPEECH });
   await page.send("Page.navigate", { url: BASE });
   check(true, "headless Edge launched with fake mic + fake Web Speech API");
+
+  // HR login (UI): the dashboard asks for a sign-in; a wrong password is refused, the right one opens it.
+  await page.waitFor(`document.querySelector('input[type=password]')`, "dashboard shows the HR sign-in form", 30_000);
+  const fill = (email: string, password: string) =>
+    page.eval<boolean>(`(() => {
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      for (const [sel, v] of [['input[type=email]', ${JSON.stringify(email)}], ['input[type=password]', ${JSON.stringify(password)}]]) {
+        const el = document.querySelector(sel); set.call(el, v); el.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      return true; })()`);
+  await fill(HR_EMAIL, "wrong-password-123");
+  await page.click("Sign in");
+  await page.waitFor(`document.querySelector('[role=alert]')?.innerText.includes('Wrong email or password')`, "wrong password is refused", 15_000);
+  check(true, "wrong password is refused on the sign-in form");
+  await fill(HR_EMAIL, HR_PASSWORD);
+  await page.click("Sign in");
 
   const card = `document.querySelector('[aria-label=${JSON.stringify(`Open ${name}`)}]')`; // newest first → our upload
   await page.waitFor(card, "candidate card visible on the dashboard", 30_000);
@@ -363,7 +410,15 @@ async function main(): Promise<void> {
     JSON.stringify(callB?.transcript),
   );
 
-  // ---------- Scenario C: candidate self-service link (/apply) ----------
+  // ---------- Signing out locks the dashboard ----------
+  await page.send("Page.navigate", { url: BASE });
+  await page.waitFor(card, "dashboard reloads signed in", 30_000);
+  await page.click("Sign out");
+  await page.waitFor(`document.querySelector('input[type=password]')`, "Sign out returns to the sign-in form", 10_000);
+  const afterSignOut = await page.eval<number>(`fetch('/api/candidates').then((r) => r.status)`);
+  check(afterSignOut === 401, `after Sign out the browser's API calls get 401 (got ${afterSignOut})`);
+
+  // ---------- Scenario C: candidate self-service link (/apply), signed out ----------
   await page.eval(`window.__fake.mode = "full"`);
   await page.send("Page.navigate", { url: `${BASE}/apply` });
   await page.waitFor(`document.querySelector('input[type=file]')`, "/apply shows the resume upload", 20_000);
@@ -380,16 +435,36 @@ async function main(): Promise<void> {
   check(!/shortlist|reject|hold|Call saved|View details/i.test(candidateDialog), "candidate never sees the analysis or recommendation", candidateDialog.slice(0, 600));
   await page.click("Done");
   await page.waitFor(`document.body.innerText.includes('All done')`, "/apply shows All done", 10_000);
-  check(true, "/apply shows \"All done\" after the call");
+  check(true, "/apply shows \"All done\" after the call (signed out: the candidate token did the work)");
 
-  const all = (await (await fetch(`${BASE}/api/candidates`)).json()) as Candidate[];
+  // The candidate token opens that one record (without the analysis) and nothing else.
+  const saved = JSON.parse(await page.eval<string>(`sessionStorage.getItem('applyCandidateId') ?? 'null'`)) as { id: string; token: string } | null;
+  check(saved !== null && saved.token.length > 20, "/apply keeps the candidate token for a refresh");
+  const own = await fetch(`${BASE}/api/candidates/${saved.id}`, { headers: { "X-Candidate-Token": saved.token } });
+  const ownBody = (await own.json()) as Candidate;
+  check(own.ok && ownBody.calls.length === 1 && ownBody.calls[0]?.analysis === null, "the token reads its own record, with the analysis hidden");
+  const tokenElsewhere = await Promise.all([
+    fetch(`${BASE}/api/candidates`, { headers: { "X-Candidate-Token": saved.token } }),
+    fetch(`${BASE}/api/candidates/${candidate.id}`, { headers: { "X-Candidate-Token": saved.token } }),
+    fetch(`${BASE}/api/candidates/${saved.id}`, { method: "DELETE", headers: { "X-Candidate-Token": saved.token } }),
+    fetch(`${BASE}/api/export.csv`, { headers: { "X-Candidate-Token": saved.token } }),
+  ]);
+  check(
+    tokenElsewhere.every((r) => r.status === 401),
+    `the token can't list, read another candidate, delete or export (${tokenElsewhere.map((r) => r.status).join(", ")})`,
+  );
+
+  const all = (await (await hrFetch(`${BASE}/api/candidates`)).json()) as Candidate[];
   const applied = all.find((c) => c.id !== candidate.id && c.resumeFileName === "sample-resume.docx" && c.calls.length === 1);
   check(applied !== undefined, "the /apply candidate is saved with its call");
   appliedId = applied.id;
   check(applied.calls[0]?.analysis !== null && (applied.calls[0]?.transcript.length ?? 0) > 10, `its transcript (${applied.calls[0]?.transcript.length} lines) is analysed`);
 
-  // HR dashboard: no upload box, candidate link instead, and the new card is there.
+  // HR dashboard (sign in again): no upload box, candidate link instead, and the new card is there.
   await page.send("Page.navigate", { url: BASE });
+  await page.waitFor(`document.querySelector('input[type=password]')`, "dashboard asks to sign in again", 30_000);
+  await fill(HR_EMAIL, HR_PASSWORD);
+  await page.click("Sign in");
   await page.waitFor(`document.querySelectorAll('[aria-label=${JSON.stringify(`Open ${name}`)}]').length >= 2`, "HR dashboard shows the /apply candidate's card", 30_000);
   check(true, "HR dashboard shows the /apply candidate's card");
   const dash = await page.eval<{ upload: boolean; link: string }>(
@@ -403,7 +478,7 @@ async function main(): Promise<void> {
 async function cleanup(): Promise<void> {
   for (const id of [candidateId, appliedId]) {
     if (!id) continue;
-    await fetch(`${BASE}/api/candidates/${id}`, { method: "DELETE" }).catch(() => undefined);
+    await hrFetch(`${BASE}/api/candidates/${id}`, { method: "DELETE" }).catch(() => undefined);
     console.log(`   cleaned up test candidate ${id}`);
   }
   try {

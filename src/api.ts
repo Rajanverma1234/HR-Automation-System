@@ -1,4 +1,4 @@
-import type { ApiErrorBody, CallRecord, Candidate, SaveCallRequest, UpdateInterviewRequest } from "../shared/types";
+import type { ApiErrorBody, AuthSession, CallRecord, Candidate, SaveCallRequest, UpdateInterviewRequest } from "../shared/types";
 
 export type HealthResponse = { ok: boolean; geminiConfigured: boolean };
 
@@ -24,6 +24,33 @@ function isApiErrorBody(value: unknown): value is ApiErrorBody {
   );
 }
 
+/** Called on any 401, so the HR dashboard can drop back to the sign-in screen. */
+let onUnauthenticated: (() => void) | null = null;
+
+export function setUnauthenticatedHandler(handler: (() => void) | null): void {
+  onUnauthenticated = handler;
+}
+
+/**
+ * The /apply page's access to the record it uploaded: the server returns a signed token with the upload,
+ * and the page sends it back to read that record and save its call. (HR uses the session cookie instead.)
+ */
+const CANDIDATE_TOKEN_HEADER = "X-Candidate-Token";
+const candidateTokens = new Map<string, string>();
+
+export function rememberCandidateToken(candidateId: string, token: string): void {
+  candidateTokens.set(candidateId, token);
+}
+
+export function candidateToken(candidateId: string): string | null {
+  return candidateTokens.get(candidateId) ?? null;
+}
+
+function candidateHeaders(candidateId: string): Record<string, string> {
+  const token = candidateTokens.get(candidateId);
+  return token ? { [CANDIDATE_TOKEN_HEADER]: token } : {};
+}
+
 /** fetch() that throws ApiRequestError for network failures and non-2xx responses. */
 async function fetchOrThrow(url: string, init?: RequestInit): Promise<Response> {
   let res: Response;
@@ -41,7 +68,10 @@ async function fetchOrThrow(url: string, init?: RequestInit): Promise<Response> 
     } catch {
       // Non-JSON error body: fall back to the status text below.
     }
-    if (isApiErrorBody(body)) throw new ApiRequestError(body.error, res.status, body.code);
+    if (isApiErrorBody(body)) {
+      if (body.code === "UNAUTHENTICATED") onUnauthenticated?.();
+      throw new ApiRequestError(body.error, res.status, body.code);
+    }
     throw new ApiRequestError(res.statusText || `Request failed (HTTP ${res.status})`, res.status);
   }
   return res;
@@ -71,17 +101,21 @@ export function listCandidates(): Promise<Candidate[]> {
 }
 
 export function getCandidate(id: string): Promise<Candidate> {
-  return request<Candidate>(`/api/candidates/${encodeURIComponent(id)}`);
+  return request<Candidate>(`/api/candidates/${encodeURIComponent(id)}`, { headers: candidateHeaders(id) });
 }
 
 export function deleteCandidate(id: string): Promise<void> {
   return request<void>(`/api/candidates/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
-export function uploadResume(file: File): Promise<Candidate> {
+export async function uploadResume(file: File): Promise<Candidate> {
   const form = new FormData();
   form.append("resume", file);
-  return request<Candidate>("/api/resume", { method: "POST", body: form });
+  const res = await fetchOrThrow("/api/resume", { method: "POST", body: form });
+  const candidate = (await res.json()) as Candidate;
+  const token = res.headers.get(CANDIDATE_TOKEN_HEADER);
+  if (token) rememberCandidateToken(candidate.id, token);
+  return candidate;
 }
 
 export type SaveCallResponse = { candidate: Candidate; call: CallRecord };
@@ -89,7 +123,7 @@ export type SaveCallResponse = { candidate: Candidate; call: CallRecord };
 export function saveCall(candidateId: string, payload: SaveCallRequest): Promise<SaveCallResponse> {
   return request<SaveCallResponse>(`/api/candidates/${encodeURIComponent(candidateId)}/calls`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...candidateHeaders(candidateId) },
     body: JSON.stringify(payload),
   });
 }
@@ -105,6 +139,22 @@ export function updateInterview(candidateId: string, payload: UpdateInterviewReq
 
 export function deleteInterview(candidateId: string): Promise<Candidate> {
   return request<Candidate>(`/api/candidates/${encodeURIComponent(candidateId)}/interview`, { method: "DELETE" });
+}
+
+export function getSession(): Promise<AuthSession> {
+  return request<AuthSession>("/api/auth/session");
+}
+
+export function login(email: string, password: string): Promise<AuthSession> {
+  return request<AuthSession>("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+export function logout(): Promise<void> {
+  return request<void>("/api/auth/logout", { method: "POST" });
 }
 
 export function errorMessage(err: unknown): string {

@@ -57,7 +57,14 @@ An HR recruiter uploads a resume (PDF or DOCX). Gemini extracts structured candi
    # Optional: use a different Gemini model (default gemini-3.6-flash)
    # GEMINI_MODEL=gemini-3.5-flash-lite
    ```
-5. **Run**
+5. **HR login** (optional locally, required on Vercel): create an account for each recruiter and a signing secret.
+   ```bash
+   npm run hr-user -- recruiter@yourcompany.com   # asks for a password (min 10 chars), prints email:scrypt$...
+   npm run hr-user -- --secret                    # prints a random AUTH_SECRET
+   ```
+   Put them in `.env`: `HR_USERS=recruiter@yourcompany.com:scrypt$...` (several accounts: comma-separated) and `AUTH_SECRET=...`.
+   Only the password's scrypt hash is stored. Locally, with `HR_USERS` unset, the dashboard opens without a login.
+6. **Run**
    ```bash
    npm run dev
    ```
@@ -71,8 +78,9 @@ An HR recruiter uploads a resume (PDF or DOCX). Gemini extracts structured candi
 | `npm run typecheck` | `tsc --noEmit` over server, shared, src and scripts |
 | `npm run seed` | Adds a fictional candidate. Add `-- --with-call` to include an analysed call with an 8-line transcript |
 | `npm run sample` | Regenerates `samples/sample-resume.docx` (fictional "Rahul Sharma") |
-| `npm run e2e` | API end-to-end test against the running dev server (upload → call → analysis → interview → CSV) |
-| `npm run test:call` | Browser test of the call transcript: starts its own server on port 3011 in demo-voice mode, drives headless Microsoft Edge with a fake mic and fake speech, places a full screening call through the real UI, then checks the live transcript, the saved transcript, the analysis, the auto-booked interview and the detail panel. It also checks that ending a call mid-answer keeps the candidate's last words. Uses Gemini, not Vapi credits. Set `EDGE_PATH` if Edge isn't in the default location |
+| `npm run e2e` | API end-to-end test against the running dev server (upload → call → analysis → interview → CSV). If the server has `HR_USERS` set, also set `E2E_HR_EMAIL` and `E2E_HR_PASSWORD` |
+| `npm run hr-user -- <email>` | Prints an `HR_USERS` entry (asks for the password). `-- --secret` prints a new `AUTH_SECRET` |
+| `npm run test:call` | Browser test of the call transcript: starts its own server on port 3011 in demo-voice mode, drives headless Microsoft Edge with a fake mic and fake speech, places a full screening call through the real UI, then checks the live transcript, the saved transcript, the analysis, the auto-booked interview and the detail panel. It also checks that ending a call mid-answer keeps the candidate's last words, and runs with HR login on: the sign-in form, a refused wrong password, sign-out, and the signed-out `/apply` flow using only its candidate token. Uses Gemini, not Vapi credits. Set `EDGE_PATH` if Edge isn't in the default location |
 
 ## Project structure
 
@@ -80,6 +88,7 @@ An HR recruiter uploads a resume (PDF or DOCX). Gemini extracts structured candi
 .
 ├── server.ts                 # Entry: dotenv, JSON body limit, API routes, error middleware, Vite middleware
 ├── server/
+│   ├── auth.ts               # HR login (HR_USERS + AUTH_SECRET), session cookie, candidate tokens, deny-by-default API guard
 │   ├── config.ts             # getGeminiApiKey() → 503 GEMINI_NOT_CONFIGURED if missing
 │   ├── errors.ts             # AppError(status, message, code)
 │   ├── gemini.ts             # generateJson<T>(): JSON-schema calls, 60 s timeout, error mapping
@@ -112,17 +121,24 @@ An HR recruiter uploads a resume (PDF or DOCX). Gemini extracts structured candi
 
 ## API reference
 
-Every error is JSON `{ "error": string, "code"?: string }` with a matching HTTP status. Common codes are `NOT_FOUND`, `INVALID_BODY`, `GEMINI_NOT_CONFIGURED` (503), `GEMINI_FAILED`/`GEMINI_OVERLOADED` (502), `GEMINI_RATE_LIMIT` (429), `DATA_CORRUPT` (500) and `INTERNAL_ERROR` (500).
+Every error is JSON `{ "error": string, "code"?: string }` with a matching HTTP status.
+
+**Access.** Every route needs an HR session (the `hr_session` cookie from `POST /api/auth/login`) and returns 401 `UNAUTHENTICATED` without one, except: `GET /api/health`, the `/api/auth/*` routes and `POST /api/resume`, which are public. `GET /api/candidates/:id` and `POST /api/candidates/:id/calls` also accept the `X-Candidate-Token` header that `POST /api/resume` returns, for that candidate only and for 48 h; with the token, calls come back with `analysis: null` and interview notes hidden. With login off (local dev, `HR_USERS` unset) everything is open. Deployed with missing or invalid auth config, the HR routes answer 503 `AUTH_NOT_CONFIGURED`.
+
+Common codes are `NOT_FOUND`, `INVALID_BODY`, `GEMINI_NOT_CONFIGURED` (503), `GEMINI_FAILED`/`GEMINI_OVERLOADED` (502), `GEMINI_RATE_LIMIT` (429), `DATA_CORRUPT` (500) and `INTERNAL_ERROR` (500).
 
 | Method & path | Request | Success response | Errors |
 |---|---|---|---|
 | `GET /api/health` | — | `200 {"ok":true,"geminiConfigured":true}` | — |
+| `GET /api/auth/session` | — | `200 AuthSession` `{authRequired, configured, user: {email} \| null}` | — |
+| `POST /api/auth/login` | JSON `{email, password}` | `200 AuthSession` + `Set-Cookie: hr_session` (httpOnly, 7 days) | 400 `INVALID_BODY`, 401 `INVALID_CREDENTIALS`, 429 `TOO_MANY_ATTEMPTS`, 503 `AUTH_NOT_CONFIGURED` |
+| `POST /api/auth/logout` | — | `204`, clears the cookie | — |
 | `GET /api/candidates` | — | `200 Candidate[]`, newest first | 500 `DATA_CORRUPT` |
 | `GET /api/candidates/:id` | — | `200 Candidate` | 404 `NOT_FOUND` |
 | `DELETE /api/candidates/:id` | — | `204` (no body) | 404 `NOT_FOUND` |
 | `PATCH /api/candidates/:id/interview` | JSON `UpdateInterviewRequest`: any of `scheduledAt` (ISO), `timeSpecified`, `status` (`scheduled`/`completed`/`no-show`/`cancelled`), `notes` | `200 Candidate` (creates the interview if none; that needs `scheduledAt`) | 400 `INVALID_BODY`, 404 `NOT_FOUND` |
 | `DELETE /api/candidates/:id/interview` | — | `200 Candidate` with `interview: null` | 404 `NOT_FOUND` |
-| `POST /api/resume` | `multipart/form-data`, field `resume` (PDF/DOCX ≤ 5 MB) | `201 Candidate` | 400 `NO_FILE`, 413 `LIMIT_FILE_SIZE`, 415 `UNSUPPORTED_FILE`, 422 `EMPTY_DOCUMENT` / `NOT_A_RESUME`, 429, 502, 503 |
+| `POST /api/resume` | `multipart/form-data`, field `resume` (PDF/DOCX ≤ 5 MB) | `201 Candidate` + `X-Candidate-Token` header | 400 `NO_FILE`, 413 `LIMIT_FILE_SIZE`, 415 `UNSUPPORTED_FILE`, 422 `EMPTY_DOCUMENT` / `NOT_A_RESUME`, 429, 502, 503 |
 | `POST /api/candidates/:id/calls` | JSON `SaveCallRequest` | `201 { candidate, call }` | 400 `INVALID_BODY`, 404 `NOT_FOUND` |
 | `GET /api/export.csv` | — | `200 text/csv`, `attachment; filename="candidates-YYYY-MM-DD.csv"` | 500 `DATA_CORRUPT` |
 
@@ -266,8 +282,8 @@ The repo deploys to Vercel as-is (project `hr-automation-system`, linked to the 
 - **Frontend**: `npm run build` (vite build) → static files in `dist/`. `vercel.json` rewrites every non-`/api` path to `index.html`.
 - **API**: [api/index.ts](api/index.ts) exports the same Express app as local dev ([server/app.ts](server/app.ts)). `vercel.json` rewrites `/api/*` to it. Region `bom1` (Mumbai).
 - **Storage**: on Vercel, [server/repository.ts](server/repository.ts) keeps the same `{ candidates: [] }` JSON document in a **private Vercel Blob** (`candidates.json`, store `hr-screening-data`), because function instances have no shared, persistent disk. Reads bypass the CDN cache and are fetched uncompressed (a compressed read returns a weak ETag that conditional writes reject), and writes are conditional on the ETag, retried on conflict. Locally it is still `data/candidates.json`; `STORAGE=blob|file` overrides the choice.
-- **Env vars** (Project → Settings → Environment Variables): `GEMINI_API_KEY` (secret), `GEMINI_MODEL`, `VITE_VAPI_PUBLIC_KEY`, `VITE_VAPI_ASSISTANT_ID` (read at build time; redeploy after changing them), and `BLOB_READ_WRITE_TOKEN` (added by connecting the Blob store).
-- **Access**: Deployment Protection is **off**, so anyone with the URL can open the app, and the app has no login of its own. Anyone with the link can view, edit and delete candidates and use the Gemini/Vapi credits. Before storing real candidate data, add a login or turn Vercel Authentication back on (Project → Settings → Deployment Protection).
+- **Env vars** (Project → Settings → Environment Variables): `GEMINI_API_KEY` (secret), `GEMINI_MODEL`, `VITE_VAPI_PUBLIC_KEY`, `VITE_VAPI_ASSISTANT_ID` (read at build time; redeploy after changing them), `BLOB_READ_WRITE_TOKEN` (added by connecting the Blob store), and `HR_USERS` + `AUTH_SECRET` (secrets) for the HR login.
+- **Access**: Deployment Protection is **off**, so the site is public; the app's own HR login protects the dashboard and the API. Without `HR_USERS` and `AUTH_SECRET` the deployed HR API is locked (503 `AUTH_NOT_CONFIGURED`) rather than open. The `/apply` page stays public: anyone with the link can upload a resume (which uses Gemini credits) and take the screening call, but can read only the record they uploaded, without the analysis.
 - **Limits**: a request body is capped at 4.5 MB on Vercel, so resumes between 4.5 and 5 MB upload locally but not on Vercel. Function duration is 300 s, enough for Gemini.
 
 Manual deploy: `vercel deploy --prod`.
@@ -294,6 +310,7 @@ To use Postgres, SQLite or another store, implement this interface and point the
 - **Call audio goes to Vapi** and the speech-to-text, LLM and voice providers configured on your assistant.
 - **Data is stored as plain, unencrypted JSON** in `data/candidates.json` on this machine. It contains personal data (contact details, salary, transcripts). `data/` is gitignored, so **never commit it**, and delete it when no longer needed.
 - Get candidates' consent before recording or analysing calls, and follow your local data-protection rules.
+- The HR dashboard and API need a sign-in (see Setup step 5). Passwords are stored only as scrypt hashes in `HR_USERS`; sessions are signed with `AUTH_SECRET`. Changing `AUTH_SECRET` signs everyone out; changing a user's password or removing them from `HR_USERS` signs that user out. Failed sign-ins are rate-limited per email and IP (best effort: per server instance).
 - `GEMINI_API_KEY` stays on the server. Only the `VITE_` Vapi public key and assistant ID reach the browser. The dev server refuses to serve `.env*`, `data/`, `server/` and `scripts/`.
 
 ## Out of scope / roadmap

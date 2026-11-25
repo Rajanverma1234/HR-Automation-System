@@ -1,6 +1,7 @@
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import multer from "multer";
 import type { ApiErrorBody } from "../shared/types.js";
+import { apiAccessGuard, authRouter } from "./auth.js";
 import { AppError } from "./errors.js";
 import { candidatesRouter } from "./routes/candidates.js";
 import { exportRouter } from "./routes/export.js";
@@ -12,12 +13,18 @@ import { resumeRouter } from "./routes/resume.js";
  */
 export function createApp(): Express {
   const app = express();
+  // Behind Vercel's proxy: lets req.secure see HTTPS, so the session cookie gets the Secure flag.
+  app.set("trust proxy", true);
   app.use(express.json({ limit: "2mb" }));
+
+  // Deny by default: everything under /api needs an HR session except the public /apply routes.
+  app.use(apiAccessGuard);
 
   app.get("/api/health", (_req: Request, res: Response) => {
     res.json({ ok: true, geminiConfigured: Boolean(process.env.GEMINI_API_KEY) });
   });
 
+  app.use("/api/auth", authRouter);
   app.use("/api/candidates", candidatesRouter);
   app.use("/api/resume", resumeRouter);
   app.use("/api", exportRouter);

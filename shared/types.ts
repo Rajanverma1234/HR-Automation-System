@@ -136,3 +136,12 @@ export type ApiErrorBody = {
   error: string;
   code?: string;
 };
+
+/** GET /api/auth/session and POST /api/auth/login. */
+export type AuthSession = {
+  /** false only in local development with HR_USERS unset. */
+  authRequired: boolean;
+  /** false when the server is deployed without a valid HR_USERS / AUTH_SECRET. */
+  configured: boolean;
+  user: { email: string } | null;
+};

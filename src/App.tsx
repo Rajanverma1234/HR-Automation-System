@@ -1,12 +1,22 @@
-import { AlertTriangle, Check, Copy, Download, ExternalLink, Loader2, RefreshCw, UserSearch } from "lucide-react";
+import { AlertTriangle, Check, Copy, Download, ExternalLink, Loader2, LogOut, RefreshCw, UserSearch } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { formatInterviewWhen, interviewState } from "../shared/interview";
-import type { Candidate } from "../shared/types";
-import { downloadExportCsv, errorMessage, getHealth, listCandidates, type HealthResponse } from "./api";
+import type { AuthSession, Candidate } from "../shared/types";
+import {
+  downloadExportCsv,
+  errorMessage,
+  getHealth,
+  getSession,
+  listCandidates,
+  logout,
+  setUnauthenticatedHandler,
+  type HealthResponse,
+} from "./api";
 import CallModal from "./components/CallModal";
 import CandidateDetailPanel from "./components/CandidateDetailPanel";
 import CandidateGrid from "./components/CandidateGrid";
 import DeleteCandidateDialog from "./components/DeleteCandidateDialog";
+import LoginPage from "./components/LoginPage";
 import { ToastProvider, useToast } from "./components/Toast";
 import Toolbar, { type StatusFilter } from "./components/Toolbar";
 import VoicePicker from "./components/VoicePicker";
@@ -41,12 +51,64 @@ function matchesFilter(candidate: Candidate, filter: StatusFilter, now: Date): b
 export default function App() {
   return (
     <ToastProvider>
-      <Dashboard />
+      <AuthGate />
     </ToastProvider>
   );
 }
 
-function Dashboard() {
+/** Shows the sign-in screen until the server confirms an HR session (or that login is off in local dev). */
+function AuthGate() {
+  const [session, setSession] = useState<AuthSession | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const check = useCallback(() => {
+    setError(null);
+    getSession()
+      .then(setSession)
+      .catch((err: unknown) => setError(errorMessage(err)));
+  }, []);
+
+  useEffect(() => {
+    check();
+    // Any API call that comes back "not signed in" (expired session, signed out in another tab) returns here.
+    setUnauthenticatedHandler(() => setSession((s) => (s && s.authRequired ? { ...s, user: null } : s)));
+    return () => setUnauthenticatedHandler(null);
+  }, [check]);
+
+  if (error) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
+        <Banner tone="red" onRetry={check}>
+          {error}
+        </Banner>
+      </div>
+    );
+  }
+  if (!session) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50" aria-busy="true">
+        <Loader2 className="h-6 w-6 animate-spin text-slate-400" aria-label="Loading" />
+      </div>
+    );
+  }
+  if (session.authRequired && !session.user) {
+    return <LoginPage configured={session.configured} onSignedIn={setSession} />;
+  }
+  return (
+    <Dashboard
+      userEmail={session.user?.email ?? null}
+      onSignOut={async () => {
+        try {
+          await logout();
+        } finally {
+          setSession({ ...session, user: null });
+        }
+      }}
+    />
+  );
+}
+
+function Dashboard({ userEmail, onSignOut }: { userEmail: string | null; onSignOut: () => Promise<void> }) {
   const toast = useToast();
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
@@ -225,6 +287,22 @@ function Dashboard() {
             {exporting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Download className="h-4 w-4" aria-hidden />}
             Export CSV
           </button>
+          {userEmail && (
+            <div className="flex items-center gap-2">
+              <span className="hidden max-w-48 truncate text-xs text-slate-500 sm:inline" title={userEmail}>
+                {userEmail}
+              </span>
+              <button
+                type="button"
+                onClick={() => void onSignOut()}
+                title="Sign out"
+                className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
+              >
+                <LogOut className="h-4 w-4" aria-hidden />
+                <span className="sr-only sm:not-sr-only">Sign out</span>
+              </button>
+            </div>
+          )}
         </div>
       </header>
 

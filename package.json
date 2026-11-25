@@ -11,7 +11,8 @@
     "sample": "tsx scripts/make-sample-resume.ts",
     "e2e": "tsx scripts/e2e.ts",
     "test:call": "tsx scripts/browser-call-test.ts",
-    "demo": "tsx scripts/demo-candidates.ts"
+    "demo": "tsx scripts/demo-candidates.ts",
+    "hr-user": "tsx scripts/hr-user.ts"
   },
   "dependencies": {
     "@google/genai": "^3.6.1",

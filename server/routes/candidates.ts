@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Router, type Request, type Response } from "express";
 import type { CallRecord, Candidate, Interview } from "../../shared/types.js";
 import { candidateNotFound as notFound, recordCall } from "../callRecorder.js";
+import { candidateView, requestAudience } from "../auth.js";
 import { AppError } from "../errors.js";
 import { candidateRepository } from "../repository.js";
 import { validateSaveCallRequest, validateUpdateInterviewRequest } from "../validation.js";
@@ -15,7 +16,7 @@ candidatesRouter.get("/", async (_req: Request, res: Response<Candidate[]>) => {
 candidatesRouter.get("/:id", async (req: Request<{ id: string }>, res: Response<Candidate>) => {
   const candidate = await candidateRepository.get(req.params.id);
   if (!candidate) throw notFound();
-  res.json(candidate);
+  res.json(requestAudience(req) === "candidate" ? candidateView(candidate) : candidate);
 });
 
 type SaveCallResponse = { candidate: Candidate; call: CallRecord };
@@ -25,6 +26,11 @@ candidatesRouter.post(
   async (req: Request<{ id: string }>, res: Response<SaveCallResponse>) => {
     const body = validateSaveCallRequest(req.body);
     const { candidate, call } = await recordCall(req.params.id, body);
+    if (requestAudience(req) === "candidate") {
+      const view = candidateView(candidate);
+      res.status(201).json({ candidate: view, call: { ...call, analysis: null, analysisError: null } });
+      return;
+    }
     res.status(201).json({ candidate, call });
   },
 );

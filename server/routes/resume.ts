@@ -2,6 +2,7 @@ import path from "node:path";
 import { Router, type Request, type Response } from "express";
 import multer from "multer";
 import type { Candidate } from "../../shared/types.js";
+import { CANDIDATE_TOKEN_HEADER, issueCandidateToken } from "../auth.js";
 import { AppError } from "../errors.js";
 import { candidateRepository } from "../repository.js";
 import { parseResume } from "../resumeParser.js";
@@ -50,5 +51,7 @@ resumeRouter.post("/", upload.single("resume"), async (req: Request, res: Respon
 
   const resumeData = await parseResume(file);
   const candidate = await candidateRepository.create({ resumeData, resumeFileName: file.originalname });
+  // Lets the uploader (the public /apply page) read this one record and save its screening call.
+  res.setHeader(CANDIDATE_TOKEN_HEADER, issueCandidateToken(candidate.id));
   res.status(201).json(candidate);
 });

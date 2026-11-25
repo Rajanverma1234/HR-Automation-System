@@ -4,7 +4,7 @@ import { AlertTriangle, CheckCircle2, FileText, Phone } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Candidate } from "../shared/types";
 import { COMPANY_NAME } from "../shared/company";
-import { getCandidate, getHealth } from "./api";
+import { candidateToken, getCandidate, getHealth, rememberCandidateToken } from "./api";
 import CallModal from "./components/CallModal";
 import { ToastProvider, useToast } from "./components/Toast";
 import UploadDropzone from "./components/UploadDropzone";
@@ -15,17 +15,34 @@ const canCall = isVapiConfigured || isBrowserVoiceSupported;
 /** Remembers this tab's upload, so a refresh doesn't create a second card. */
 const SESSION_KEY = "applyCandidateId";
 
-function readSession(): string | null {
+type SavedSession = { id: string; token: string };
+
+function readSession(): SavedSession | null {
   try {
-    return window.sessionStorage.getItem(SESSION_KEY);
+    const raw = window.sessionStorage.getItem(SESSION_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      "id" in parsed &&
+      typeof parsed.id === "string" &&
+      "token" in parsed &&
+      typeof parsed.token === "string"
+    ) {
+      return { id: parsed.id, token: parsed.token };
+    }
+    return null;
   } catch {
     return null;
   }
 }
 
 function writeSession(id: string): void {
+  // The token arrived with the upload; it lets this page read its own record after a refresh.
+  const token = candidateToken(id);
+  if (!token) return;
   try {
-    window.sessionStorage.setItem(SESSION_KEY, id);
+    window.sessionStorage.setItem(SESSION_KEY, JSON.stringify({ id, token } satisfies SavedSession));
   } catch {
     // storage blocked: a refresh just starts over
   }
@@ -53,7 +70,8 @@ function ApplyPage() {
       .catch(() => setUploadsDisabled("We can't reach our server right now. Please try again in a few minutes."));
     const saved = readSession();
     if (saved) {
-      getCandidate(saved)
+      rememberCandidateToken(saved.id, saved.token);
+      getCandidate(saved.id)
         .then((c) => {
           setCandidate(c);
           setDone(c.calls.length > 0);

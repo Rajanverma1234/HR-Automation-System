@@ -115,6 +115,31 @@ async function main(): Promise<void> {
   check(h.ok === true, "GET /api/health → ok: true");
   check(h.geminiConfigured === true, "Gemini configured", "Set GEMINI_API_KEY in .env and restart `npm run dev`.");
 
+  // HR login: when the server has HR_USERS set, sign in with E2E_HR_EMAIL / E2E_HR_PASSWORD and send the cookie on every call.
+  const session = (await readJson(await fetch(`${BASE_URL}/api/auth/session`))) as { authRequired?: unknown };
+  if (session.authRequired === true) {
+    const locked = await fetch(`${BASE_URL}/api/candidates`);
+    check(locked.status === 401, "HR login on: GET /api/candidates without a session → 401");
+    const email = process.env.E2E_HR_EMAIL;
+    const password = process.env.E2E_HR_PASSWORD;
+    check(email && password, "E2E_HR_EMAIL and E2E_HR_PASSWORD are set", "The server requires HR login: set both env vars for this test.");
+    const res = await fetch(`${BASE_URL}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    const cookie = (res.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+    check(res.ok && cookie.startsWith("hr_session="), "POST /api/auth/login → session cookie");
+    const plainFetch = globalThis.fetch;
+    globalThis.fetch = (input, init) => {
+      const headers = new Headers(init?.headers);
+      headers.set("Cookie", cookie);
+      return plainFetch(input, { ...init, headers });
+    };
+  } else {
+    console.log("   … HR login is off on this server (HR_USERS unset): testing without a session");
+  }
+
   // 2. Sample resume
   if (!existsSync(SAMPLE_DOCX)) {
     console.log("   … samples/sample-resume.docx missing, generating it");
