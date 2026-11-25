@@ -1,21 +1,33 @@
 // HR login and API access control.
 //
-// - HR accounts come from the HR_USERS env var: comma-separated `email:scryptHash` entries
-//   (make one with `npm run hr-user -- someone@company.com`).
+// - Super admins (owners) come from the HR_USERS env var: comma-separated `username:scryptHash[:Display name]`
+//   entries (make one with `npm run hr-user -- nisha --name Nisha`). They can't be changed from the app.
+// - Recruiters are added by a super admin on the Team page and stored with the candidates (server/repository.ts).
 // - A signed, httpOnly session cookie (HMAC with AUTH_SECRET) keeps an HR user signed in for 7 days.
-//   Changing that user's password, removing them from HR_USERS, or changing AUTH_SECRET signs them out.
+//   Changing that user's password, removing the account, or changing AUTH_SECRET signs them out.
 // - Every /api route needs an HR session, except the few the public /apply page uses. The candidate on /apply
 //   gets a signed token for their own record when they upload, and can read only that record and save its call.
+// - Managing the team and deleting candidates is for super admins only.
 // - Auth is off only for local development with HR_USERS unset. On Vercel a missing config locks the API (503).
 import { createHmac, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { Router, type NextFunction, type Request, type Response } from "express";
-import type { ApiErrorBody, AuthSession, Candidate } from "../shared/types.js";
+import type { ApiErrorBody, AuthSession, Candidate, HrRole, HrSessionUser } from "../shared/types.js";
 import { AppError } from "./errors.js";
+import { hrUserRepository } from "./repository.js";
 
 const SESSION_COOKIE = "hr_session";
 const SESSION_TTL_SEC = 7 * 24 * 60 * 60;
 const CANDIDATE_TOKEN_TTL_SEC = 48 * 60 * 60;
 export const CANDIDATE_TOKEN_HEADER = "x-candidate-token";
+export const MIN_PASSWORD_LENGTH = 10;
+export const MAX_PASSWORD_LENGTH = 200;
+
+/** Login ids: a plain username ("nisha") or an email. Lowercase; no ":" or "," (the HR_USERS separators). */
+export const USERNAME_RE = /^[a-z0-9][a-z0-9._@+-]{2,63}$/;
+
+export function normalizeUsername(value: string): string {
+  return value.trim().toLowerCase();
+}
 
 // ---------- password hashing (scrypt, no extra dependency) ----------
 
@@ -49,31 +61,36 @@ async function verifyPassword(password: string, stored: string): Promise<boolean
 
 // ---------- configuration ----------
 
-type HrUser = { email: string; passwordHash: string };
+/** Anyone who can sign in: an owner from HR_USERS or a stored recruiter. */
+export type HrAccount = {
+  id: string;
+  username: string;
+  name: string | null;
+  role: HrRole;
+  passwordHash: string;
+  source: "env" | "stored";
+};
 
 type AuthConfig =
-  | { mode: "on"; users: Map<string, HrUser>; secret: string }
-  /** Local dev with HR_USERS unset: everything is open, as before this feature. */
+  | { mode: "on"; owners: Map<string, HrAccount>; secret: string }
+  /** Local dev with HR_USERS unset: everything is open, as before login existed. */
   | { mode: "off"; secret: string }
   /** Deployed without (valid) config: the HR API refuses every request. */
   | { mode: "misconfigured"; reason: string; secret: string };
 
-function normalizeEmail(email: string): string {
-  return email.trim().toLowerCase();
-}
-
-function parseUsers(raw: string): Map<string, HrUser> | string {
-  const users = new Map<string, HrUser>();
+function parseOwners(raw: string): Map<string, HrAccount> | string {
+  const owners = new Map<string, HrAccount>();
   for (const entry of raw.split(",").map((e) => e.trim()).filter(Boolean)) {
-    const sep = entry.indexOf(":");
-    const email = sep > 0 ? normalizeEmail(entry.slice(0, sep)) : "";
-    const passwordHash = sep > 0 ? entry.slice(sep + 1).trim() : "";
-    if (!email.includes("@") || !passwordHash.startsWith("scrypt$")) {
-      return `HR_USERS has an invalid entry (expected email:scrypt$...). Make entries with \`npm run hr-user\`.`;
+    // username:scrypt$N$salt$hash[:Display name]
+    const [login = "", passwordHash = "", ...nameParts] = entry.split(":");
+    const username = normalizeUsername(login);
+    const name = nameParts.join(":").trim() || null;
+    if (!USERNAME_RE.test(username) || !passwordHash.startsWith("scrypt$")) {
+      return "HR_USERS has an invalid entry (expected username:scrypt$...[:Name]). Make entries with `npm run hr-user`.";
     }
-    users.set(email, { email, passwordHash });
+    owners.set(username, { id: `env:${username}`, username, name, role: "superadmin", passwordHash: passwordHash.trim(), source: "env" });
   }
-  return users.size > 0 ? users : "HR_USERS has no entries.";
+  return owners.size > 0 ? owners : "HR_USERS has no entries.";
 }
 
 /** Process-local fallback for signing candidate tokens when auth is off. */
@@ -95,8 +112,8 @@ function authConfig(): AuthConfig {
   } else if (secret.length < 32) {
     config = { mode: "misconfigured", reason: "AUTH_SECRET must be set (at least 32 characters).", secret: EPHEMERAL_SECRET };
   } else {
-    const users = parseUsers(rawUsers);
-    config = typeof users === "string" ? { mode: "misconfigured", reason: users, secret } : { mode: "on", users, secret };
+    const owners = parseOwners(rawUsers);
+    config = typeof owners === "string" ? { mode: "misconfigured", reason: owners, secret } : { mode: "on", owners, secret };
   }
 
   if (config.mode === "off") {
@@ -106,6 +123,23 @@ function authConfig(): AuthConfig {
   }
   cachedConfig = config;
   return config;
+}
+
+/** The owner (super admin) accounts from HR_USERS; empty when login is off or misconfigured. */
+export function ownerAccounts(): HrAccount[] {
+  const config = authConfig();
+  return config.mode === "on" ? [...config.owners.values()] : [];
+}
+
+async function findAccount(username: string): Promise<HrAccount | null> {
+  const config = authConfig();
+  if (config.mode !== "on") return null;
+  const owner = config.owners.get(username);
+  if (owner) return owner;
+  const stored = (await hrUserRepository.listHrUsers()).find((u) => u.username === username);
+  return stored
+    ? { id: stored.id, username: stored.username, name: stored.name, role: stored.role, passwordHash: stored.passwordHash, source: "stored" }
+    : null;
 }
 
 // ---------- signing helpers ----------
@@ -125,19 +159,18 @@ function nowSec(): number {
 }
 
 /** Short fingerprint of the password hash: a password change invalidates existing sessions. */
-function passwordVersion(secret: string, user: HrUser): string {
-  return sign(secret, "pwv", user.passwordHash).slice(0, 12);
+function passwordVersion(secret: string, account: HrAccount): string {
+  return sign(secret, "pwv", account.passwordHash).slice(0, 12);
 }
 
 // ---------- HR session cookie ----------
 
-type SessionPayload = { e: string; exp: number; v: string };
+type SessionPayload = { u: string; exp: number; v: string };
 
-function encodeSession(secret: string, user: HrUser): { value: string; exp: number } {
-  const exp = nowSec() + SESSION_TTL_SEC;
-  const payload: SessionPayload = { e: user.email, exp, v: passwordVersion(secret, user) };
+function encodeSession(secret: string, account: HrAccount): string {
+  const payload: SessionPayload = { u: account.username, exp: nowSec() + SESSION_TTL_SEC, v: passwordVersion(secret, account) };
   const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
-  return { value: `${body}.${sign(secret, "session", body)}`, exp };
+  return `${body}.${sign(secret, "session", body)}`;
 }
 
 function readCookie(req: Request, name: string): string | null {
@@ -155,8 +188,8 @@ function isSessionPayload(value: unknown): value is SessionPayload {
   return (
     typeof value === "object" &&
     value !== null &&
-    "e" in value &&
-    typeof value.e === "string" &&
+    "u" in value &&
+    typeof value.u === "string" &&
     "exp" in value &&
     typeof value.exp === "number" &&
     "v" in value &&
@@ -164,7 +197,8 @@ function isSessionPayload(value: unknown): value is SessionPayload {
   );
 }
 
-function sessionUser(req: Request): HrUser | null {
+/** The account behind the request's session cookie, if it is valid and the account still exists unchanged. */
+async function sessionAccount(req: Request): Promise<HrAccount | null> {
   const config = authConfig();
   if (config.mode !== "on") return null;
   const raw = readCookie(req, SESSION_COOKIE);
@@ -180,9 +214,9 @@ function sessionUser(req: Request): HrUser | null {
     return null;
   }
   if (!isSessionPayload(payload) || payload.exp <= nowSec()) return null;
-  const user = config.users.get(payload.e);
-  if (!user || payload.v !== passwordVersion(config.secret, user)) return null;
-  return user;
+  const account = await findAccount(payload.u);
+  if (!account || payload.v !== passwordVersion(config.secret, account)) return null;
+  return account;
 }
 
 function isHttps(req: Request): boolean {
@@ -199,6 +233,10 @@ function setSessionCookie(req: Request, res: Response, value: string, maxAgeSec:
   ];
   if (isHttps(req)) parts.push("Secure");
   res.setHeader("Set-Cookie", parts.join("; "));
+}
+
+function sessionUserOf(account: HrAccount): HrSessionUser {
+  return { username: account.username, name: account.name, role: account.role };
 }
 
 // ---------- candidate token (the /apply page's access to its own record) ----------
@@ -228,15 +266,27 @@ export function candidateView(candidate: Candidate): Candidate {
 
 // ---------- access guard ----------
 
-type Audience = "hr" | "candidate";
-const audiences = new WeakMap<Request, Audience>();
+type Access = { audience: "candidate" } | { audience: "hr"; user: HrSessionUser };
+const accessByRequest = new WeakMap<Request, Access>();
+
+/** With login off (local dev) the user acts as a super admin. */
+const LOCAL_DEV_USER: HrSessionUser = { username: "local-dev", name: "Local development", role: "superadmin" };
 
 /** "candidate" when the request was let in by a candidate token rather than an HR session. */
-export function requestAudience(req: Request): Audience {
-  return audiences.get(req) ?? "hr";
+export function requestAudience(req: Request): "hr" | "candidate" {
+  return accessByRequest.get(req)?.audience ?? "hr";
 }
 
-const PUBLIC_ROUTES: { method: string; path: RegExp }[] = [
+/** The signed-in HR user. Only valid on routes the guard let in with an HR session. */
+export function requestUser(req: Request): HrSessionUser {
+  const access = accessByRequest.get(req);
+  if (access?.audience === "hr") return access.user;
+  throw new AppError(401, "Please sign in to the HR dashboard.", "UNAUTHENTICATED");
+}
+
+type Route = { method: string; path: RegExp };
+
+const PUBLIC_ROUTES: Route[] = [
   { method: "GET", path: /^\/api\/health\/?$/ },
   { method: "GET", path: /^\/api\/auth\/session\/?$/ },
   { method: "POST", path: /^\/api\/auth\/login\/?$/ },
@@ -246,33 +296,47 @@ const PUBLIC_ROUTES: { method: string; path: RegExp }[] = [
 ];
 
 /** Routes a candidate token opens, for that candidate's id only. */
-const CANDIDATE_ROUTES: { method: string; path: RegExp }[] = [
+const CANDIDATE_ROUTES: Route[] = [
   { method: "GET", path: /^\/api\/candidates\/([^/]+)\/?$/ },
   { method: "POST", path: /^\/api\/candidates\/([^/]+)\/calls\/?$/ },
 ];
 
-function unauthenticated(): AppError {
-  return new AppError(401, "Please sign in to the HR dashboard.", "UNAUTHENTICATED");
+/** Super admins only: managing the team, and deleting candidates. */
+const SUPERADMIN_ROUTES: Route[] = [
+  { method: "*", path: /^\/api\/hr-users(\/.*)?$/ },
+  { method: "DELETE", path: /^\/api\/candidates\/[^/]+\/?$/ },
+];
+
+function matches(routes: Route[], req: Request): boolean {
+  return routes.some((r) => (r.method === "*" || r.method === req.method) && r.path.test(req.path));
+}
+
+function notConfigured(): AppError {
+  return new AppError(503, "HR login is not configured on the server yet. Ask the admin to set HR_USERS and AUTH_SECRET.", "AUTH_NOT_CONFIGURED");
 }
 
 /** Deny by default: every /api request needs an HR session unless listed above. */
-export function apiAccessGuard(req: Request, _res: Response, next: NextFunction): void {
+export async function apiAccessGuard(req: Request, _res: Response, next: NextFunction): Promise<void> {
   const path = req.path;
-  if (!path.startsWith("/api/") && path !== "/api") {
-    next();
-    return;
-  }
-  if (PUBLIC_ROUTES.some((r) => r.method === req.method && r.path.test(path))) {
+  if (!path.startsWith("/api/") || matches(PUBLIC_ROUTES, req)) {
     next();
     return;
   }
 
   const config = authConfig();
+  let user: HrSessionUser | null = null;
   if (config.mode === "off") {
-    next();
-    return;
+    user = LOCAL_DEV_USER;
+  } else if (config.mode === "on") {
+    const account = await sessionAccount(req);
+    if (account) user = sessionUserOf(account);
   }
-  if (config.mode === "on" && sessionUser(req)) {
+
+  if (user) {
+    if (user.role !== "superadmin" && matches(SUPERADMIN_ROUTES, req)) {
+      throw new AppError(403, "Only a super admin can do this.", "FORBIDDEN");
+    }
+    accessByRequest.set(req, { audience: "hr", user });
     next();
     return;
   }
@@ -282,16 +346,14 @@ export function apiAccessGuard(req: Request, _res: Response, next: NextFunction)
     const match = route.path.exec(path);
     const id = match?.[1] ? decodeURIComponent(match[1]) : null;
     if (id && hasCandidateToken(req, id)) {
-      audiences.set(req, "candidate");
+      accessByRequest.set(req, { audience: "candidate" });
       next();
       return;
     }
   }
 
-  if (config.mode === "misconfigured") {
-    throw new AppError(503, "HR login is not configured on the server yet. Ask the admin to set HR_USERS and AUTH_SECRET.", "AUTH_NOT_CONFIGURED");
-  }
-  throw unauthenticated();
+  if (config.mode === "misconfigured") throw notConfigured();
+  throw new AppError(401, "Please sign in to the HR dashboard.", "UNAUTHENTICATED");
 }
 
 // ---------- login rate limit (best effort: per server instance) ----------
@@ -316,60 +378,63 @@ function recentFailures(key: string): number[] {
 
 // ---------- routes ----------
 
-/** Used for unknown emails, so a wrong email takes as long as a wrong password. */
+/** Used for unknown usernames, so a wrong username takes as long as a wrong password. */
 let dummyHash: Promise<string> | null = null;
 
 export const authRouter = Router();
 
-function sessionBody(req: Request): AuthSession {
+async function sessionBody(req: Request): Promise<AuthSession> {
   const config = authConfig();
   if (config.mode === "off") return { authRequired: false, configured: true, user: null };
   if (config.mode === "misconfigured") return { authRequired: true, configured: false, user: null };
-  const user = sessionUser(req);
-  return { authRequired: true, configured: true, user: user ? { email: user.email } : null };
+  const account = await sessionAccount(req);
+  return { authRequired: true, configured: true, user: account ? sessionUserOf(account) : null };
 }
 
-authRouter.get("/session", (req: Request, res: Response<AuthSession>) => {
+function stringField(body: unknown, key: string): string {
+  if (typeof body !== "object" || body === null || !(key in body)) return "";
+  const value: unknown = (body as Record<string, unknown>)[key];
+  return typeof value === "string" ? value : "";
+}
+
+authRouter.get("/session", async (req: Request, res: Response<AuthSession>) => {
   res.setHeader("Cache-Control", "no-store");
-  res.json(sessionBody(req));
+  res.json(await sessionBody(req));
 });
 
 authRouter.post("/login", async (req: Request, res: Response<AuthSession | ApiErrorBody>) => {
   const config = authConfig();
   if (config.mode === "off") {
-    res.json(sessionBody(req));
+    res.json(await sessionBody(req));
     return;
   }
-  if (config.mode === "misconfigured") {
-    throw new AppError(503, "HR login is not configured on the server yet. Ask the admin to set HR_USERS and AUTH_SECRET.", "AUTH_NOT_CONFIGURED");
-  }
+  if (config.mode === "misconfigured") throw notConfigured();
 
-  const body: unknown = req.body;
-  const email = typeof body === "object" && body !== null && "email" in body && typeof body.email === "string" ? normalizeEmail(body.email) : "";
-  const password = typeof body === "object" && body !== null && "password" in body && typeof body.password === "string" ? body.password : "";
-  if (!email || !password || password.length > 200) {
-    throw new AppError(400, "Enter your email and password.", "INVALID_BODY");
+  // `email` is accepted too, for clients written before usernames.
+  const username = normalizeUsername(stringField(req.body, "username") || stringField(req.body, "email"));
+  const password = stringField(req.body, "password");
+  if (!username || !password || password.length > MAX_PASSWORD_LENGTH) {
+    throw new AppError(400, "Enter your username and password.", "INVALID_BODY");
   }
 
   const ipKey = `ip:${clientIp(req)}`;
-  const emailKey = `email:${email}`;
-  if (recentFailures(ipKey).length >= MAX_FAILURES * 3 || recentFailures(emailKey).length >= MAX_FAILURES) {
+  const userKey = `user:${username}`;
+  if (recentFailures(ipKey).length >= MAX_FAILURES * 3 || recentFailures(userKey).length >= MAX_FAILURES) {
     throw new AppError(429, "Too many failed sign-in attempts. Try again in 15 minutes.", "TOO_MANY_ATTEMPTS");
   }
 
-  const user = config.users.get(email);
+  const account = await findAccount(username);
   dummyHash ??= hashPassword(randomBytes(16).toString("hex"));
-  const valid = await verifyPassword(password, user?.passwordHash ?? (await dummyHash));
-  if (!user || !valid) {
-    for (const key of [ipKey, emailKey]) failures.set(key, [...recentFailures(key), Date.now()]);
-    throw new AppError(401, "Wrong email or password.", "INVALID_CREDENTIALS");
+  const valid = await verifyPassword(password, account?.passwordHash ?? (await dummyHash));
+  if (!account || !valid) {
+    for (const key of [ipKey, userKey]) failures.set(key, [...recentFailures(key), Date.now()]);
+    throw new AppError(401, "Wrong username or password.", "INVALID_CREDENTIALS");
   }
 
-  failures.delete(emailKey);
-  const session = encodeSession(config.secret, user);
-  setSessionCookie(req, res, session.value, SESSION_TTL_SEC);
+  failures.delete(userKey);
+  setSessionCookie(req, res, encodeSession(config.secret, account), SESSION_TTL_SEC);
   res.setHeader("Cache-Control", "no-store");
-  res.json({ authRequired: true, configured: true, user: { email: user.email } });
+  res.json({ authRequired: true, configured: true, user: sessionUserOf(account) });
 });
 
 authRouter.post("/logout", (req: Request, res: Response) => {

@@ -1,7 +1,7 @@
-import { AlertTriangle, Check, Copy, Download, ExternalLink, Loader2, LogOut, RefreshCw, UserSearch } from "lucide-react";
+import { AlertTriangle, Check, Copy, Download, ExternalLink, Loader2, LogOut, RefreshCw, UserSearch, Users } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { formatInterviewWhen, interviewState } from "../shared/interview";
-import type { AuthSession, Candidate } from "../shared/types";
+import type { AuthSession, Candidate, HrSessionUser } from "../shared/types";
 import {
   downloadExportCsv,
   errorMessage,
@@ -17,6 +17,7 @@ import CandidateDetailPanel from "./components/CandidateDetailPanel";
 import CandidateGrid from "./components/CandidateGrid";
 import DeleteCandidateDialog from "./components/DeleteCandidateDialog";
 import LoginPage from "./components/LoginPage";
+import TeamPanel from "./components/TeamPanel";
 import { ToastProvider, useToast } from "./components/Toast";
 import Toolbar, { type StatusFilter } from "./components/Toolbar";
 import VoicePicker from "./components/VoicePicker";
@@ -96,7 +97,7 @@ function AuthGate() {
   }
   return (
     <Dashboard
-      userEmail={session.user?.email ?? null}
+      user={session.user}
       onSignOut={async () => {
         try {
           await logout();
@@ -108,8 +109,11 @@ function AuthGate() {
   );
 }
 
-function Dashboard({ userEmail, onSignOut }: { userEmail: string | null; onSignOut: () => Promise<void> }) {
+/** `user` is null only with login off (local dev), where everyone acts as a super admin. */
+function Dashboard({ user, onSignOut }: { user: HrSessionUser | null; onSignOut: () => Promise<void> }) {
   const toast = useToast();
+  const isSuperAdmin = user === null || user.role === "superadmin";
+  const [teamOpen, setTeamOpen] = useState(false);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
@@ -287,10 +291,22 @@ function Dashboard({ userEmail, onSignOut }: { userEmail: string | null; onSignO
             {exporting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Download className="h-4 w-4" aria-hidden />}
             Export CSV
           </button>
-          {userEmail && (
+          {isSuperAdmin && (
+            <button
+              type="button"
+              onClick={() => setTeamOpen(true)}
+              title="Manage who can sign in"
+              className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
+            >
+              <Users className="h-4 w-4" aria-hidden />
+              Team
+            </button>
+          )}
+          {user && (
             <div className="flex items-center gap-2">
-              <span className="hidden max-w-48 truncate text-xs text-slate-500 sm:inline" title={userEmail}>
-                {userEmail}
+              <span className="hidden max-w-48 truncate text-xs text-slate-500 sm:inline" title={user.username}>
+                {user.name ?? user.username}
+                {user.role === "superadmin" ? " · Super admin" : ""}
               </span>
               <button
                 type="button"
@@ -392,7 +408,7 @@ function Dashboard({ userEmail, onSignOut }: { userEmail: string | null; onSignO
               loading={loading}
               onOpen={(c) => setOpenId(c.id)}
               onCall={handleCall}
-              onDelete={(c) => setPendingDelete(c)}
+              onDelete={isSuperAdmin ? (c) => setPendingDelete(c) : undefined}
               callDisabled={callDisabled}
               callDisabledReason={callDisabledReason}
             />
@@ -407,6 +423,7 @@ function Dashboard({ userEmail, onSignOut }: { userEmail: string | null; onSignO
           onClose={() => setOpenId(null)}
           onCall={handleCall}
           onDeleted={(id) => handleDeleted(id, candidates.find((c) => c.id === id)?.resumeData.name ?? null)}
+          canDelete={isSuperAdmin}
           onUpdated={handleCandidateUpdated}
           callDisabled={callDisabled}
           callDisabledReason={callDisabledReason}
@@ -430,6 +447,8 @@ function Dashboard({ userEmail, onSignOut }: { userEmail: string | null; onSignO
         onCancel={() => setPendingDelete(null)}
         onDeleted={(c) => handleDeleted(c.id, c.resumeData.name)}
       />
+
+      {teamOpen && <TeamPanel currentUsername={user?.username ?? null} onClose={() => setTeamOpen(false)} />}
 
     </div>
   );

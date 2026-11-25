@@ -11,7 +11,7 @@ type Props = {
 };
 
 export default function LoginPage({ configured, onSignedIn }: Props) {
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -22,7 +22,7 @@ export default function LoginPage({ configured, onSignedIn }: Props) {
     setBusy(true);
     setError(null);
     try {
-      onSignedIn(await login(email, password));
+      onSignedIn(await login(username, password));
     } catch (err) {
       setError(errorMessage(err));
       setPassword("");
@@ -52,15 +52,17 @@ export default function LoginPage({ configured, onSignedIn }: Props) {
         ) : (
           <form onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
             <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
-              Work email
+              Username
               <input
-                type="email"
-                name="email"
+                type="text"
+                name="username"
                 autoComplete="username"
+                autoCapitalize="none"
+                spellCheck={false}
                 required
                 autoFocus
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
                 className="min-h-11 rounded-lg border border-slate-300 px-3 text-base font-normal focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
               />
             </label>

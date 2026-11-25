@@ -57,13 +57,17 @@ An HR recruiter uploads a resume (PDF or DOCX). Gemini extracts structured candi
    # Optional: use a different Gemini model (default gemini-3.6-flash)
    # GEMINI_MODEL=gemini-3.5-flash-lite
    ```
-5. **HR login** (optional locally, required on Vercel): create an account for each recruiter and a signing secret.
+5. **HR login** (optional locally, required on Vercel). There are two roles:
+   - **Super admin** (owner): set on the server in `HR_USERS`. Can do everything, manage the team on the dashboard's **Team** page, and delete candidates.
+   - **Recruiter**: added by a super admin on the Team page (stored with the candidates). Can view, call and update candidates, but can't delete them or manage the team.
+
+   Create the super admin(s) and a signing secret:
    ```bash
-   npm run hr-user -- recruiter@yourcompany.com   # asks for a password (min 10 chars), prints email:scrypt$...
-   npm run hr-user -- --secret                    # prints a random AUTH_SECRET
+   npm run hr-user -- nisha --name Nisha   # asks for a password (min 10 chars), prints nisha:scrypt$...:Nisha
+   npm run hr-user -- --secret             # prints a random AUTH_SECRET
    ```
-   Put them in `.env`: `HR_USERS=recruiter@yourcompany.com:scrypt$...` (several accounts: comma-separated) and `AUTH_SECRET=...`.
-   Only the password's scrypt hash is stored. Locally, with `HR_USERS` unset, the dashboard opens without a login.
+   Put them in `.env`: `HR_USERS=nisha:scrypt$...:Nisha` (several super admins: comma-separated) and `AUTH_SECRET=...`.
+   Usernames can be plain (`nisha`) or emails. Only the password's scrypt hash is stored. Locally, with `HR_USERS` unset, the dashboard opens without a login (and acts as a super admin).
 6. **Run**
    ```bash
    npm run dev
@@ -78,8 +82,8 @@ An HR recruiter uploads a resume (PDF or DOCX). Gemini extracts structured candi
 | `npm run typecheck` | `tsc --noEmit` over server, shared, src and scripts |
 | `npm run seed` | Adds a fictional candidate. Add `-- --with-call` to include an analysed call with an 8-line transcript |
 | `npm run sample` | Regenerates `samples/sample-resume.docx` (fictional "Rahul Sharma") |
-| `npm run e2e` | API end-to-end test against the running dev server (upload → call → analysis → interview → CSV). If the server has `HR_USERS` set, also set `E2E_HR_EMAIL` and `E2E_HR_PASSWORD` |
-| `npm run hr-user -- <email>` | Prints an `HR_USERS` entry (asks for the password). `-- --secret` prints a new `AUTH_SECRET` |
+| `npm run e2e` | API end-to-end test against the running dev server (upload → call → analysis → interview → CSV). If the server has `HR_USERS` set, also set `E2E_HR_USERNAME` and `E2E_HR_PASSWORD` |
+| `npm run hr-user -- <username> [--name "Name"]` | Prints a super admin `HR_USERS` entry (asks for the password). `-- --secret` prints a new `AUTH_SECRET` |
 | `npm run test:call` | Browser test of the call transcript: starts its own server on port 3011 in demo-voice mode, drives headless Microsoft Edge with a fake mic and fake speech, places a full screening call through the real UI, then checks the live transcript, the saved transcript, the analysis, the auto-booked interview and the detail panel. It also checks that ending a call mid-answer keeps the candidate's last words, and runs with HR login on: the sign-in form, a refused wrong password, sign-out, and the signed-out `/apply` flow using only its candidate token. Uses Gemini, not Vapi credits. Set `EDGE_PATH` if Edge isn't in the default location |
 
 ## Project structure
@@ -88,7 +92,7 @@ An HR recruiter uploads a resume (PDF or DOCX). Gemini extracts structured candi
 .
 ├── server.ts                 # Entry: dotenv, JSON body limit, API routes, error middleware, Vite middleware
 ├── server/
-│   ├── auth.ts               # HR login (HR_USERS + AUTH_SECRET), session cookie, candidate tokens, deny-by-default API guard
+│   ├── auth.ts               # HR login (HR_USERS + AUTH_SECRET), roles, session cookie, candidate tokens, deny-by-default API guard
 │   ├── config.ts             # getGeminiApiKey() → 503 GEMINI_NOT_CONFIGURED if missing
 │   ├── errors.ts             # AppError(status, message, code)
 │   ├── gemini.ts             # generateJson<T>(): JSON-schema calls, 60 s timeout, error mapping
@@ -123,7 +127,7 @@ An HR recruiter uploads a resume (PDF or DOCX). Gemini extracts structured candi
 
 Every error is JSON `{ "error": string, "code"?: string }` with a matching HTTP status.
 
-**Access.** Every route needs an HR session (the `hr_session` cookie from `POST /api/auth/login`) and returns 401 `UNAUTHENTICATED` without one, except: `GET /api/health`, the `/api/auth/*` routes and `POST /api/resume`, which are public. `GET /api/candidates/:id` and `POST /api/candidates/:id/calls` also accept the `X-Candidate-Token` header that `POST /api/resume` returns, for that candidate only and for 48 h; with the token, calls come back with `analysis: null` and interview notes hidden. With login off (local dev, `HR_USERS` unset) everything is open. Deployed with missing or invalid auth config, the HR routes answer 503 `AUTH_NOT_CONFIGURED`.
+**Access.** Every route needs an HR session (the `hr_session` cookie from `POST /api/auth/login`) and returns 401 `UNAUTHENTICATED` without one, except: `GET /api/health`, the `/api/auth/*` routes and `POST /api/resume`, which are public. `GET /api/candidates/:id` and `POST /api/candidates/:id/calls` also accept the `X-Candidate-Token` header that `POST /api/resume` returns, for that candidate only and for 48 h; with the token, calls come back with `analysis: null` and interview notes hidden. `/api/hr-users` and `DELETE /api/candidates/:id` are for super admins only (403 `FORBIDDEN` for recruiters). With login off (local dev, `HR_USERS` unset) everything is open. Deployed with missing or invalid auth config, the HR routes answer 503 `AUTH_NOT_CONFIGURED`.
 
 Common codes are `NOT_FOUND`, `INVALID_BODY`, `GEMINI_NOT_CONFIGURED` (503), `GEMINI_FAILED`/`GEMINI_OVERLOADED` (502), `GEMINI_RATE_LIMIT` (429), `DATA_CORRUPT` (500) and `INTERNAL_ERROR` (500).
 
@@ -131,8 +135,12 @@ Common codes are `NOT_FOUND`, `INVALID_BODY`, `GEMINI_NOT_CONFIGURED` (503), `GE
 |---|---|---|---|
 | `GET /api/health` | — | `200 {"ok":true,"geminiConfigured":true}` | — |
 | `GET /api/auth/session` | — | `200 AuthSession` `{authRequired, configured, user: {email} \| null}` | — |
-| `POST /api/auth/login` | JSON `{email, password}` | `200 AuthSession` + `Set-Cookie: hr_session` (httpOnly, 7 days) | 400 `INVALID_BODY`, 401 `INVALID_CREDENTIALS`, 429 `TOO_MANY_ATTEMPTS`, 503 `AUTH_NOT_CONFIGURED` |
+| `POST /api/auth/login` | JSON `{username, password}` | `200 AuthSession` + `Set-Cookie: hr_session` (httpOnly, 7 days) | 400 `INVALID_BODY`, 401 `INVALID_CREDENTIALS`, 429 `TOO_MANY_ATTEMPTS`, 503 `AUTH_NOT_CONFIGURED` |
 | `POST /api/auth/logout` | — | `204`, clears the cookie | — |
+| `GET /api/hr-users` | — (super admin) | `200 HrUserSummary[]`: super admins from `HR_USERS` (read-only) then recruiters | 403 `FORBIDDEN` |
+| `POST /api/hr-users` | JSON `{username, name, password}` (super admin) | `201 HrUserSummary` (a recruiter) | 400 `INVALID_BODY`, 403, 409 `USERNAME_TAKEN` |
+| `PATCH /api/hr-users/:id` | JSON `{name?, password?}` (super admin) | `200 HrUserSummary`; a new password signs them out | 400, 403, 404 |
+| `DELETE /api/hr-users/:id` | — (super admin) | `204`; ends their session | 403, 404 |
 | `GET /api/candidates` | — | `200 Candidate[]`, newest first | 500 `DATA_CORRUPT` |
 | `GET /api/candidates/:id` | — | `200 Candidate` | 404 `NOT_FOUND` |
 | `DELETE /api/candidates/:id` | — | `204` (no body) | 404 `NOT_FOUND` |
@@ -310,7 +318,7 @@ To use Postgres, SQLite or another store, implement this interface and point the
 - **Call audio goes to Vapi** and the speech-to-text, LLM and voice providers configured on your assistant.
 - **Data is stored as plain, unencrypted JSON** in `data/candidates.json` on this machine. It contains personal data (contact details, salary, transcripts). `data/` is gitignored, so **never commit it**, and delete it when no longer needed.
 - Get candidates' consent before recording or analysing calls, and follow your local data-protection rules.
-- The HR dashboard and API need a sign-in (see Setup step 5). Passwords are stored only as scrypt hashes in `HR_USERS`; sessions are signed with `AUTH_SECRET`. Changing `AUTH_SECRET` signs everyone out; changing a user's password or removing them from `HR_USERS` signs that user out. Failed sign-ins are rate-limited per email and IP (best effort: per server instance).
+- The HR dashboard and API need a sign-in (see Setup step 5). Passwords are stored only as scrypt hashes (`HR_USERS` for super admins, the storage document for recruiters); sessions are signed with `AUTH_SECRET`. Changing `AUTH_SECRET` signs everyone out; changing a user's password or removing the account signs that user out. Failed sign-ins are rate-limited per username and IP (best effort: per server instance). To change a super admin's password, make a new entry with `npm run hr-user`, replace it in `HR_USERS` and redeploy.
 - `GEMINI_API_KEY` stays on the server. Only the `VITE_` Vapi public key and assistant ID reach the browser. The dev server refuses to serve `.env*`, `data/`, `server/` and `scripts/`.
 
 ## Out of scope / roadmap

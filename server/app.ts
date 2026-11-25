@@ -5,6 +5,7 @@ import { apiAccessGuard, authRouter } from "./auth.js";
 import { AppError } from "./errors.js";
 import { candidatesRouter } from "./routes/candidates.js";
 import { exportRouter } from "./routes/export.js";
+import { hrUsersRouter } from "./routes/hrUsers.js";
 import { resumeRouter } from "./routes/resume.js";
 
 /**
@@ -25,6 +26,7 @@ export function createApp(): Express {
   });
 
   app.use("/api/auth", authRouter);
+  app.use("/api/hr-users", hrUsersRouter);
   app.use("/api/candidates", candidatesRouter);
   app.use("/api/resume", resumeRouter);
   app.use("/api", exportRouter);

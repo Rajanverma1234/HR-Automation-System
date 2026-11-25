@@ -8,7 +8,7 @@ type Props = {
   loading: boolean;
   onOpen: (candidate: Candidate) => void;
   onCall: (candidate: Candidate) => void;
-  onDelete: (candidate: Candidate) => void;
+  onDelete?: (candidate: Candidate) => void;
   callDisabled?: boolean;
   callDisabledReason?: string;
 };

@@ -137,11 +137,48 @@ export type ApiErrorBody = {
   code?: string;
 };
 
+/**
+ * "superadmin": the owner accounts from the HR_USERS env var. They can also manage the team
+ * (add / remove recruiters, reset their passwords) and delete candidates.
+ * "recruiter": accounts a super admin adds on the Team page (stored with the candidates).
+ */
+export type HrRole = "superadmin" | "recruiter";
+
+/** The signed-in HR user, as the browser sees it. */
+export type HrSessionUser = { username: string; name: string | null; role: HrRole };
+
 /** GET /api/auth/session and POST /api/auth/login. */
 export type AuthSession = {
   /** false only in local development with HR_USERS unset. */
   authRequired: boolean;
   /** false when the server is deployed without a valid HR_USERS / AUTH_SECRET. */
   configured: boolean;
-  user: { email: string } | null;
+  user: HrSessionUser | null;
 };
+
+/** A stored recruiter account (never sent to the browser: it holds the password hash). */
+export type StoredHrUser = {
+  id: string;
+  username: string;
+  name: string | null;
+  role: "recruiter";
+  passwordHash: string;
+  createdAt: string;
+  updatedAt: string;
+  /** Username of the super admin who added the account. */
+  createdBy: string | null;
+};
+
+/** GET /api/hr-users: everyone who can sign in. Owner accounts come from HR_USERS and can't be edited here. */
+export type HrUserSummary = {
+  id: string;
+  username: string;
+  name: string | null;
+  role: HrRole;
+  source: "env" | "stored";
+  createdAt: string | null;
+  createdBy: string | null;
+};
+
+export type CreateHrUserRequest = { username: string; name: string | null; password: string };
+export type UpdateHrUserRequest = { name?: string | null; password?: string };

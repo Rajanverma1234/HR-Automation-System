@@ -13,6 +13,8 @@ type Props = {
   onClose: () => void;
   onCall: (candidate: Candidate) => void;
   onDeleted: (id: string) => void;
+  /** false for recruiters: only a super admin can delete candidates. */
+  canDelete?: boolean;
   /** The candidate changed in the panel (e.g. the interview was edited). */
   onUpdated: (candidate: Candidate) => void;
   /** Change this number to force a refetch (e.g. after a call is saved). */
@@ -31,6 +33,7 @@ export default function CandidateDetailPanel({
   onClose,
   onCall,
   onDeleted,
+  canDelete = true,
   onUpdated,
   refreshKey,
   callDisabled = false,
@@ -124,7 +127,7 @@ export default function CandidateDetailPanel({
             <PanelBody
               candidate={state.candidate}
               onCall={onCall}
-              onDelete={() => setConfirmDelete(state.candidate)}
+              onDelete={canDelete ? () => setConfirmDelete(state.candidate) : undefined}
               callDisabled={callDisabled}
               callDisabledReason={callDisabledReason}
               onUpdated={(candidate) => {
@@ -158,7 +161,7 @@ function PanelBody({
 }: {
   candidate: Candidate;
   onCall: (candidate: Candidate) => void;
-  onDelete: () => void;
+  onDelete: (() => void) | undefined;
   onUpdated: (candidate: Candidate) => void;
   callDisabled: boolean;
   callDisabledReason: string | undefined;
@@ -208,14 +211,16 @@ function PanelBody({
             <Phone className="h-4 w-4" aria-hidden />
             Call
           </button>
-          <button
-            type="button"
-            onClick={onDelete}
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-red-200 bg-white px-4 text-sm font-medium text-red-600 hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2"
-          >
-            <Trash2 className="h-4 w-4" aria-hidden />
-            Delete
-          </button>
+          {onDelete && (
+            <button
+              type="button"
+              onClick={onDelete}
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-red-200 bg-white px-4 text-sm font-medium text-red-600 hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2"
+            >
+              <Trash2 className="h-4 w-4" aria-hidden />
+              Delete
+            </button>
+          )}
         </div>
       </section>
 

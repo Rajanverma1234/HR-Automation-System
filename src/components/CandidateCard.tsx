@@ -11,7 +11,8 @@ type Props = {
   now: Date;
   onOpen: (candidate: Candidate) => void;
   onCall: (candidate: Candidate) => void;
-  onDelete: (candidate: Candidate) => void;
+  /** Omitted for recruiters: only a super admin can delete candidates. */
+  onDelete?: (candidate: Candidate) => void;
   callDisabled?: boolean;
   callDisabledReason?: string;
 };
@@ -179,6 +180,7 @@ export default function CandidateCard({
           <Phone className="h-4 w-4" aria-hidden />
           Call
         </button>
+        {onDelete && (
         <button
           type="button"
           onClick={(e) => {
@@ -192,6 +194,7 @@ export default function CandidateCard({
         >
           <Trash2 className="h-4 w-4" aria-hidden />
         </button>
+        )}
       </div>
     </div>
   );

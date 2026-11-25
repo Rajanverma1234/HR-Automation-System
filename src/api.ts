@@ -1,4 +1,14 @@
-import type { ApiErrorBody, AuthSession, CallRecord, Candidate, SaveCallRequest, UpdateInterviewRequest } from "../shared/types";
+import type {
+  ApiErrorBody,
+  AuthSession,
+  CallRecord,
+  Candidate,
+  CreateHrUserRequest,
+  HrUserSummary,
+  SaveCallRequest,
+  UpdateHrUserRequest,
+  UpdateInterviewRequest,
+} from "../shared/types";
 
 export type HealthResponse = { ok: boolean; geminiConfigured: boolean };
 
@@ -145,12 +155,38 @@ export function getSession(): Promise<AuthSession> {
   return request<AuthSession>("/api/auth/session");
 }
 
-export function login(email: string, password: string): Promise<AuthSession> {
+export function login(username: string, password: string): Promise<AuthSession> {
   return request<AuthSession>("/api/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ username, password }),
   });
+}
+
+// ---------- Team (super admins only) ----------
+
+export function listHrUsers(): Promise<HrUserSummary[]> {
+  return request<HrUserSummary[]>("/api/hr-users");
+}
+
+export function createHrUser(payload: CreateHrUserRequest): Promise<HrUserSummary> {
+  return request<HrUserSummary>("/api/hr-users", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateHrUser(id: string, payload: UpdateHrUserRequest): Promise<HrUserSummary> {
+  return request<HrUserSummary>(`/api/hr-users/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteHrUser(id: string): Promise<void> {
+  return request<void>(`/api/hr-users/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
 export function logout(): Promise<void> {

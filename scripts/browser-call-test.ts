@@ -30,7 +30,7 @@ const ROOT = process.cwd();
 const SAMPLE_DOCX = path.join(ROOT, "samples", "sample-resume.docx");
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 /** The test server runs with HR login on, using this throwaway account. */
-const HR_EMAIL = "test-hr@example.com";
+const HR_EMAIL = "test-admin";
 const HR_PASSWORD = randomBytes(12).toString("base64url");
 let hrCookie = "";
 
@@ -217,6 +217,55 @@ async function getCandidate(id: string): Promise<Candidate> {
   return (await (await hrFetch(`${BASE}/api/candidates/${id}`)).json()) as Candidate;
 }
 
+const UI_RECRUITER = `ui-recruiter-${randomBytes(3).toString("hex")}`;
+
+async function login(username: string, password: string): Promise<{ status: number; cookie: string }> {
+  const res = await fetch(`${BASE}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  return { status: res.status, cookie: (res.headers.get("set-cookie") ?? "").split(";")[0] ?? "" };
+}
+
+/** Recruiter accounts (API level): what a recruiter may and may not do, password reset, removal. */
+async function checkRecruiterRoles(): Promise<void> {
+  const username = `api-recruiter-${randomBytes(3).toString("hex")}`;
+  const password = "recruiter-pass-1";
+  const json = { "Content-Type": "application/json" };
+  const created = await hrFetch(`${BASE}/api/hr-users`, { method: "POST", headers: json, body: JSON.stringify({ username, name: "API Recruiter", password }) });
+  const account = (await created.json()) as { id: string; role: string };
+  check(created.status === 201 && account.role === "recruiter", "super admin adds a recruiter (POST /api/hr-users → 201)");
+  const dup = await hrFetch(`${BASE}/api/hr-users`, { method: "POST", headers: json, body: JSON.stringify({ username, name: null, password }) });
+  const ownerDup = await hrFetch(`${BASE}/api/hr-users`, { method: "POST", headers: json, body: JSON.stringify({ username: HR_EMAIL, name: null, password }) });
+  check(dup.status === 409 && ownerDup.status === 409, "a taken username (recruiter or super admin) is refused → 409");
+
+  const r = await login(username, password);
+  check(r.status === 200 && r.cookie.startsWith("hr_session="), "the recruiter signs in");
+  const as = (url: string, init: RequestInit = {}) => fetch(url, { ...init, headers: { ...(init.headers as Record<string, string> | undefined), Cookie: r.cookie } });
+  const list = await as(`${BASE}/api/candidates`);
+  check(list.status === 200, "recruiter can list candidates");
+  const forbidden = await Promise.all([
+    as(`${BASE}/api/hr-users`),
+    as(`${BASE}/api/hr-users`, { method: "POST", headers: json, body: JSON.stringify({ username: "sneaky", name: null, password }) }),
+    as(`${BASE}/api/candidates/00000000-0000-0000-0000-000000000000`, { method: "DELETE" }),
+  ]);
+  check(forbidden.every((x) => x.status === 403), `recruiter can't see or change the team or delete candidates → 403 (${forbidden.map((x) => x.status).join(", ")})`);
+
+  const reset = await hrFetch(`${BASE}/api/hr-users/${account.id}`, { method: "PATCH", headers: json, body: JSON.stringify({ password: "new-recruiter-pass" }) });
+  const oldSession = await as(`${BASE}/api/candidates`);
+  const oldPassword = await login(username, password);
+  const newPassword = await login(username, "new-recruiter-pass");
+  check(
+    reset.ok && oldSession.status === 401 && oldPassword.status === 401 && newPassword.status === 200,
+    "password reset signs the recruiter out; only the new password works",
+  );
+
+  const removed = await hrFetch(`${BASE}/api/hr-users/${account.id}`, { method: "DELETE" });
+  const afterRemove = await fetch(`${BASE}/api/candidates`, { headers: { Cookie: newPassword.cookie } });
+  check(removed.status === 204 && afterRemove.status === 401, "removing the recruiter ends their session");
+}
+
 // ---------- the test ----------
 let server: ChildProcess | null = null;
 let edge: ChildProcess | null = null;
@@ -237,7 +286,7 @@ async function main(): Promise<void> {
       HMR_PORT: String(HMR_PORT),
       VITE_VAPI_PUBLIC_KEY: "",
       VITE_VAPI_ASSISTANT_ID: "",
-      HR_USERS: `${HR_EMAIL}:${await hashPassword(HR_PASSWORD)}`,
+      HR_USERS: `${HR_EMAIL}:${await hashPassword(HR_PASSWORD)}:Test Admin`,
       AUTH_SECRET: randomBytes(32).toString("base64url"),
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -259,10 +308,11 @@ async function main(): Promise<void> {
   const signIn = await fetch(`${BASE}/api/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: HR_EMAIL, password: HR_PASSWORD }),
+    body: JSON.stringify({ username: HR_EMAIL, password: HR_PASSWORD }),
   });
   hrCookie = (signIn.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
-  check(signIn.ok && hrCookie.startsWith("hr_session="), "HR sign-in via API returns a session cookie");
+  check(signIn.ok && hrCookie.startsWith("hr_session="), "super admin sign-in via API returns a session cookie");
+  await checkRecruiterRoles();
 
   // Test candidate from the committed sample resume.
   const form = new FormData();
@@ -315,16 +365,36 @@ async function main(): Promise<void> {
   const fill = (email: string, password: string) =>
     page.eval<boolean>(`(() => {
       const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-      for (const [sel, v] of [['input[type=email]', ${JSON.stringify(email)}], ['input[type=password]', ${JSON.stringify(password)}]]) {
+      for (const [sel, v] of [['input[name=username]', ${JSON.stringify(email)}], ['input[type=password]', ${JSON.stringify(password)}]]) {
         const el = document.querySelector(sel); set.call(el, v); el.dispatchEvent(new Event('input', { bubbles: true }));
       }
       return true; })()`);
   await fill(HR_EMAIL, "wrong-password-123");
   await page.click("Sign in");
-  await page.waitFor(`document.querySelector('[role=alert]')?.innerText.includes('Wrong email or password')`, "wrong password is refused", 15_000);
+  await page.waitFor(`document.querySelector('[role=alert]')?.innerText.includes('Wrong username or password')`, "wrong password is refused", 15_000);
   check(true, "wrong password is refused on the sign-in form");
   await fill(HR_EMAIL, HR_PASSWORD);
   await page.click("Sign in");
+
+  // Team page (super admin): add a recruiter through the form.
+  await page.waitFor(`[...document.querySelectorAll('button')].some((b) => b.innerText.trim() === 'Team')`, "super admin sees the Team button", 30_000);
+  await page.click("Team");
+  await page.waitFor(`document.querySelector('[aria-label="HR accounts"]')?.innerText.includes('Super admin')`, "Team lists the super admin", 15_000);
+  await page.eval<boolean>(`(() => {
+    const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    const inputs = document.querySelectorAll('form[aria-label="Add a recruiter"] input');
+    ['UI Recruiter', ${JSON.stringify(UI_RECRUITER)}, 'ui-recruiter-pass-1'].forEach((v, i) => { set.call(inputs[i], v); inputs[i].dispatchEvent(new Event('input', { bubbles: true })); });
+    return true; })()`);
+  await page.click("Add recruiter");
+  await page.waitFor(`document.querySelector('[aria-label="HR accounts"]')?.innerText.includes(${JSON.stringify(UI_RECRUITER)})`, "recruiter added on the Team page appears in the list", 15_000);
+  check(true, "super admin added a recruiter on the Team page");
+  const uiLogin = await fetch(`${BASE}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: UI_RECRUITER, password: "ui-recruiter-pass-1" }),
+  });
+  check(uiLogin.ok, "the recruiter added in the UI can sign in");
+  await page.click("Close team");
 
   const card = `document.querySelector('[aria-label=${JSON.stringify(`Open ${name}`)}]')`; // newest first → our upload
   await page.waitFor(card, "candidate card visible on the dashboard", 30_000);
@@ -341,7 +411,7 @@ async function main(): Promise<void> {
     180_000,
   );
   const dialogText = await page.eval<string>(`document.querySelector('[role=dialog]').innerText`);
-  check(dialogText.includes("Call saved"), "call window shows \"Call saved\" with the analysis", dialogText.slice(0, 800));
+  check(dialogText.includes("Call saved"), "call window shows \"Call saved\" with the analysis", dialogText.slice(-800));
 
   const spoken = await page.eval<string[]>("window.__fake.spoken");
   const heard = await page.eval<string[]>("window.__fake.heard");
@@ -476,6 +546,13 @@ async function main(): Promise<void> {
 }
 
 async function cleanup(): Promise<void> {
+  // The recruiter added through the Team page.
+  if (hrCookie) {
+    const users = (await (await hrFetch(`${BASE}/api/hr-users`).catch(() => null))?.json().catch(() => [])) as { id: string; username: string }[] | undefined;
+    for (const u of users ?? []) {
+      if (u.username === UI_RECRUITER) await hrFetch(`${BASE}/api/hr-users/${u.id}`, { method: "DELETE" }).catch(() => undefined);
+    }
+  }
   for (const id of [candidateId, appliedId]) {
     if (!id) continue;
     await hrFetch(`${BASE}/api/candidates/${id}`, { method: "DELETE" }).catch(() => undefined);

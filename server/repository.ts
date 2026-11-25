@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { BlobPreconditionFailedError, get as blobGet, put as blobPut } from "@vercel/blob";
-import type { Candidate, ResumeData } from "../shared/types.js";
+import type { Candidate, ResumeData, StoredHrUser } from "../shared/types.js";
 import { AppError } from "./errors.js";
 
 export interface CandidateRepository {
@@ -15,7 +15,18 @@ export interface CandidateRepository {
   delete(id: string): Promise<boolean>;
 }
 
-type StoreFile = { candidates: Candidate[] };
+/** Recruiter accounts added on the Team page. They live in the same document as the candidates. */
+export interface HrUserRepository {
+  listHrUsers(): Promise<StoredHrUser[]>;
+  /** Fails with 409 USERNAME_TAKEN if `isTaken` says so or a stored account already has the username. */
+  createHrUser(user: StoredHrUser, isTaken: (username: string) => boolean): Promise<StoredHrUser>;
+  /** Applies `updater` and sets updatedAt. Returns null if the account does not exist. */
+  updateHrUser(id: string, updater: (u: StoredHrUser) => StoredHrUser): Promise<StoredHrUser | null>;
+  deleteHrUser(id: string): Promise<boolean>;
+}
+
+/** `hrUsers` is missing in documents saved before HR accounts existed. */
+type StoreFile = { candidates: Candidate[]; hrUsers?: StoredHrUser[] };
 
 function isStoreFile(value: unknown): value is StoreFile {
   return (
@@ -121,7 +132,7 @@ const MAX_CONFLICT_RETRIES = 5;
 
 // ---------- repository ----------
 
-export class JsonCandidateRepository implements CandidateRepository {
+export class JsonCandidateRepository implements CandidateRepository, HrUserRepository {
   /** Promise-chain lock: within one process, every operation runs after the previous one settles. */
   private queue: Promise<unknown> = Promise.resolve();
 
@@ -236,6 +247,48 @@ export class JsonCandidateRepository implements CandidateRepository {
       return { result: store.candidates.length !== before, changed: store.candidates.length !== before };
     });
   }
+
+  // ---------- HR accounts ----------
+
+  listHrUsers(): Promise<StoredHrUser[]> {
+    return this.read(({ hrUsers }) => [...(hrUsers ?? [])].sort((a, b) => a.createdAt.localeCompare(b.createdAt)));
+  }
+
+  createHrUser(user: StoredHrUser, isTaken: (username: string) => boolean): Promise<StoredHrUser> {
+    return this.transact((store) => {
+      const users = store.hrUsers ?? [];
+      if (isTaken(user.username) || users.some((u) => u.username === user.username)) {
+        throw new AppError(409, `The username "${user.username}" is already taken.`, "USERNAME_TAKEN");
+      }
+      store.hrUsers = [...users, user];
+      return { result: user, changed: true };
+    });
+  }
+
+  updateHrUser(id: string, updater: (u: StoredHrUser) => StoredHrUser): Promise<StoredHrUser | null> {
+    return this.transact((store) => {
+      const users = store.hrUsers ?? [];
+      const existing = users.find((u) => u.id === id);
+      if (!existing) return { result: null, changed: false };
+      const updated: StoredHrUser = {
+        ...updater(structuredClone(existing)),
+        id: existing.id,
+        username: existing.username,
+        updatedAt: new Date().toISOString(),
+      };
+      store.hrUsers = users.map((u) => (u.id === id ? updated : u));
+      return { result: updated, changed: true };
+    });
+  }
+
+  deleteHrUser(id: string): Promise<boolean> {
+    return this.transact((store) => {
+      const users = store.hrUsers ?? [];
+      const remaining = users.filter((u) => u.id !== id);
+      store.hrUsers = remaining;
+      return { result: remaining.length !== users.length, changed: remaining.length !== users.length };
+    });
+  }
 }
 
 /** Vercel Blob when running on Vercel (or STORAGE=blob); otherwise the local JSON file. STORAGE=file forces the file. */
@@ -245,4 +298,6 @@ function createBackend(): StoreBackend {
   return useBlob ? new BlobBackend("candidates.json") : new FileBackend(path.resolve(process.cwd(), "data", "candidates.json"));
 }
 
-export const candidateRepository: CandidateRepository = new JsonCandidateRepository(createBackend());
+const repository = new JsonCandidateRepository(createBackend());
+export const candidateRepository: CandidateRepository = repository;
+export const hrUserRepository: HrUserRepository = repository;
