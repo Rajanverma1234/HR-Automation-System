@@ -261,11 +261,11 @@ How list columns are joined:
 
 ## Deploying to Vercel
 
-The repo deploys to Vercel as-is (project `hr-automation-system`, connected to GitHub, so every push to `main` deploys):
+The repo deploys to Vercel as-is (project `hr-automation-system`, linked to the GitHub repo; Git-triggered deployments are currently off, so deploy with `vercel deploy --prod` or turn on automatic deployments in Project → Settings → Git):
 
 - **Frontend**: `npm run build` (vite build) → static files in `dist/`. `vercel.json` rewrites every non-`/api` path to `index.html`.
 - **API**: [api/index.ts](api/index.ts) exports the same Express app as local dev ([server/app.ts](server/app.ts)). `vercel.json` rewrites `/api/*` to it. Region `bom1` (Mumbai).
-- **Storage**: on Vercel, [server/repository.ts](server/repository.ts) keeps the same `{ candidates: [] }` JSON document in a **private Vercel Blob** (`candidates.json`, store `hr-screening-data`), because function instances have no shared, persistent disk. Reads bypass the CDN cache, and writes are conditional on the ETag, retried on conflict. Locally it is still `data/candidates.json`; `STORAGE=blob|file` overrides the choice.
+- **Storage**: on Vercel, [server/repository.ts](server/repository.ts) keeps the same `{ candidates: [] }` JSON document in a **private Vercel Blob** (`candidates.json`, store `hr-screening-data`), because function instances have no shared, persistent disk. Reads bypass the CDN cache and are fetched uncompressed (a compressed read returns a weak ETag that conditional writes reject), and writes are conditional on the ETag, retried on conflict. Locally it is still `data/candidates.json`; `STORAGE=blob|file` overrides the choice.
 - **Env vars** (Project → Settings → Environment Variables): `GEMINI_API_KEY` (secret), `GEMINI_MODEL`, `VITE_VAPI_PUBLIC_KEY`, `VITE_VAPI_ASSISTANT_ID` (read at build time; redeploy after changing them), and `BLOB_READ_WRITE_TOKEN` (added by connecting the Blob store).
 - **Access**: Vercel Authentication (Deployment Protection) is on, so only members of the Vercel team can open the deployment. The app has no login of its own; keep protection on, because the data includes candidates' personal details.
 - **Limits**: a request body is capped at 4.5 MB on Vercel, so resumes between 4.5 and 5 MB upload locally but not on Vercel. Function duration is 300 s, enough for Gemini.

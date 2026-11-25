@@ -84,9 +84,11 @@ class BlobBackend implements StoreBackend {
 
   async read(): Promise<{ text: string | null; version: string | null }> {
     try {
-      const res = await blobGet(this.pathname, { access: "private", useCache: false });
+      // A compressed response carries a weak ETag (W/"…") that never satisfies `ifMatch` on put, so ask for the
+      // uncompressed bytes; strip a W/ prefix too, in case a proxy compresses anyway (the hash itself is the same).
+      const res = await blobGet(this.pathname, { access: "private", useCache: false, headers: { "Accept-Encoding": "identity" } });
       if (res === null || res.statusCode !== 200) return { text: null, version: null };
-      return { text: await new Response(res.stream).text(), version: res.blob.etag };
+      return { text: await new Response(res.stream).text(), version: res.blob.etag.replace(/^W\//, "") };
     } catch (err) {
       throw storageError(this.label, err);
     }
